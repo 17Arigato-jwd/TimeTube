@@ -3,6 +3,15 @@
   "name": "TimeFit for YouTube",
   "version": "1.0.0",
   "description": "Only shows YouTube videos you have time to finish before your break ends, with live sidebar pruning and smart Shorts guardrails.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "timefit-youtube@example.org",
+      "strict_min_version": "121.0"
+    },
+    "gecko_android": {
+      "strict_min_version": "121.0"
+    }
+  },
   "permissions": ["storage", "alarms"],
   "host_permissions": [
     "https://www.youtube.com/*",
@@ -10,6 +19,7 @@
   ],
   "background": {
     "service_worker": "dist/background.js",
+    "scripts": ["dist/background.js"],
     "type": "module"
   },
   "action": {
