@@ -1,17 +1,17 @@
 /**
  * Parses YouTube duration badges ("4:32", "1:05:20", "0:45") or
  * ARIA duration labels ("12 minutes, 30 seconds", "45 seconds") into seconds.
- * Returns null for non-numeric badges like "LIVE", "SHORTS", or "UPCOMING".
+ * Ignores relative upload times like "2 hours ago" or non-numeric badges like "New" / "LIVE".
  */
 export function parseDurationText(raw: string | null | undefined): number | null {
   if (!raw) return null;
   const cleaned = raw.trim();
   if (!cleaned) return null;
 
-  // Standard colon-separated format: MM:SS or HH:MM:SS
-  const colonMatch = cleaned.match(/^(\d{1,2}:)?(\d{1,2}):(\d{2})$/);
+  // Standard colon-separated format: MM:SS or HH:MM:SS (exact or embedded)
+  const colonMatch = cleaned.match(/\b(\d{1,2}:)?(\d{1,2}):(\d{2})\b/);
   if (colonMatch) {
-    const parts = cleaned.split(':').map((p) => Number.parseInt(p, 10));
+    const parts = colonMatch[0].split(':').map((p) => Number.parseInt(p, 10));
     if (parts.some((n) => Number.isNaN(n))) return null;
     if (parts.length === 2) {
       return (parts[0] ?? 0) * 60 + (parts[1] ?? 0);
@@ -21,10 +21,10 @@ export function parseDurationText(raw: string | null | undefined): number | null
     }
   }
 
-  // Spoken ARIA label fallback: e.g., "1 hour, 5 minutes, 20 seconds"
-  const hoursMatch = cleaned.match(/(\d+)\s+hours?/i);
-  const minsMatch = cleaned.match(/(\d+)\s+minutes?/i);
-  const secsMatch = cleaned.match(/(\d+)\s+seconds?/i);
+  // Spoken ARIA label fallback: e.g., "1 hour, 5 minutes, 20 seconds" (excluding "2 hours ago")
+  const hoursMatch = cleaned.match(/(\d+)\s+hours?(?!\s+ago\b)/i);
+  const minsMatch = cleaned.match(/(\d+)\s+minutes?(?!\s+ago\b)/i);
+  const secsMatch = cleaned.match(/(\d+)\s+seconds?(?!\s+ago\b)/i);
 
   if (hoursMatch || minsMatch || secsMatch) {
     const h = hoursMatch ? Number.parseInt(hoursMatch[1] ?? '0', 10) : 0;
@@ -58,7 +58,7 @@ export function extractLengthSecondsFromHtml(html: string): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
-/** Extracts a YouTube video ID from a /shorts/<id> or /watch?v=<id> URL path. */
+/** Extracts a YouTube video ID from a /shorts/<id> URL path. */
 export function extractShortIdFromHref(href: string): string | null {
   const match = href.match(/\/shorts\/([a-zA-Z0-9_-]{6,})/);
   return match?.[1] ?? null;

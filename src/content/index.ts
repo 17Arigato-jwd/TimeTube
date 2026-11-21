@@ -34,6 +34,22 @@ const VIDEO_CARD_SELECTORS = [
   'ytm-compact-video-renderer',
 ].join(', ');
 
+const DURATION_BADGE_SELECTORS = [
+  'ytd-thumbnail-overlay-time-status-renderer #text',
+  'ytd-thumbnail-overlay-time-status-renderer .badge-shape-wiz__text',
+  'ytd-thumbnail-overlay-time-status-renderer',
+  'yt-thumbnail-overlay-badge-view-model .yt-badge-shape__text',
+  'yt-thumbnail-overlay-badge-view-model .badge-shape-wiz__text',
+  'yt-thumbnail-badge-view-model .yt-badge-shape__text',
+  'yt-thumbnail-badge-view-model .badge-shape-wiz__text',
+  'yt-thumbnail-badge-view-model',
+  'badge-shape .yt-badge-shape__text',
+  'badge-shape .badge-shape-wiz__text',
+  'badge-shape',
+  '.yt-badge-shape__text',
+  '.badge-shape-wiz__text',
+].join(', ');
+
 const SHORTS_NAV_SELECTORS = [
   'ytd-guide-entry-renderer a[title="Shorts"]',
   'ytd-mini-guide-entry-renderer a[title="Shorts"]',
@@ -52,6 +68,8 @@ let shortObserver: IntersectionObserver | null = null;
 let mutationObserver: MutationObserver | null = null;
 let sweepTimer: number | null = null;
 let mutationDebounceTimer: number | null = null;
+let lastScrollNudgeMs = 0;
+let consecutiveScrollNudges = 0;
 
 function getCurrentSnapshot(): SessionSnapshot {
   return buildSessionSnapshot(persistedState, Date.now(), {
@@ -234,7 +252,10 @@ function checkAutoplayOnWatchPage(): void {
   }
 
   if (observed === 'enabled' && !autoplayGuideActive) {
-    if (persistedState.autoplayOnboarding === 'claimed_disabled' || persistedState.autoplayOnboarding === 'verified_disabled') {
+    if (
+      persistedState.autoplayOnboarding === 'claimed_disabled' ||
+      persistedState.autoplayOnboarding === 'verified_disabled'
+    ) {
       pauseActiveVideo();
       showAutoplaySetupPrompt('detected_enabled');
     } else if (persistedState.autoplayOnboarding === 'unseen') {
@@ -261,6 +282,55 @@ function syncShortsNavVisibility(): void {
   }
 }
 
+/**
+ * Scans ALL badge elements on a video card (skipping non-duration pills like "New" or "4K")
+ * and falls back to title/link aria-labels to reliably extract video duration.
+ */
+function findVideoDurationSeconds(card: HTMLElement): { seconds: number | null; isLive: boolean } {
+  const explicitLive = card.querySelector(
+    '.badge-style-type-live-now-alternate, [overlay-style="LIVE"], ytd-badge-supported-renderer[aria-label*="LIVE"]',
+  );
+  if (explicitLive) {
+    return { seconds: null, isLive: true };
+  }
+
+  const badges = card.querySelectorAll<HTMLElement>(DURATION_BADGE_SELECTORS);
+  let sawLiveText = false;
+  for (const el of badges) {
+    // Ignore our own injected Short duration pill if any
+    if (el.classList.contains('yt-timefit-short-duration')) continue;
+    const text = el.textContent?.trim() ?? '';
+    const aria = el.getAttribute('aria-label')?.trim() ?? '';
+
+    if (/^\s*live\s*$/i.test(text) || /\blive now\b/i.test(aria)) {
+      sawLiveText = true;
+      continue;
+    }
+
+    const fromText = parseDurationText(text);
+    if (fromText !== null) return { seconds: fromText, isLive: false };
+
+    const fromAria = parseDurationText(aria);
+    if (fromAria !== null) return { seconds: fromAria, isLive: false };
+  }
+
+  if (sawLiveText) {
+    return { seconds: null, isLive: true };
+  }
+
+  // Fallback: YouTube frequently embeds duration in the title/thumbnail link's aria-label
+  const ariaLinks = card.querySelectorAll<HTMLElement>('a[aria-label], [id="video-title"][aria-label]');
+  for (const link of ariaLinks) {
+    const aria = link.getAttribute('aria-label');
+    const parsed = parseDurationText(aria);
+    if (parsed !== null) {
+      return { seconds: parsed, isLive: false };
+    }
+  }
+
+  return { seconds: null, isLive: false };
+}
+
 function extractCandidateFromCard(card: HTMLElement): { candidate: VideoCandidate; shortId: string | null } {
   const shortLink = card.querySelector<HTMLAnchorElement>('a[href*="/shorts/"]');
   const shortId = shortLink ? extractShortIdFromHref(shortLink.getAttribute('href') ?? '') : null;
@@ -282,34 +352,20 @@ function extractCandidateFromCard(card: HTMLElement): { candidate: VideoCandidat
   const idMatch = href.match(/[?&]v=([a-zA-Z0-9_-]{6,})/);
   const videoId = idMatch?.[1] ?? card.getAttribute('data-ytb-id') ?? 'unknown';
 
-  const liveBadge = card.querySelector(
-    '.badge-style-type-live-now-alternate, [overlay-style="LIVE"], ytd-badge-supported-renderer[aria-label*="LIVE"]',
-  );
-  if (liveBadge) {
+  const { seconds, isLive } = findVideoDurationSeconds(card);
+  if (isLive) {
     return {
       shortId: null,
       candidate: { id: videoId, kind: 'livestream', durationSeconds: null },
     };
   }
 
-  const timeEl = card.querySelector<HTMLElement>(
-    'ytd-thumbnail-overlay-time-status-renderer #text, ytd-thumbnail-overlay-time-status-renderer .badge-shape-wiz__text, badge-shape .badge-shape-wiz__text, .yt-badge-shape__text',
-  );
-  const rawTime = timeEl?.textContent?.trim() ?? timeEl?.getAttribute('aria-label') ?? null;
-  if (rawTime && /live/i.test(rawTime)) {
-    return {
-      shortId: null,
-      candidate: { id: videoId, kind: 'livestream', durationSeconds: null },
-    };
-  }
-
-  const parsedSec = parseDurationText(rawTime);
   return {
     shortId: null,
     candidate: {
       id: videoId,
       kind: 'video',
-      durationSeconds: parsedSec,
+      durationSeconds: seconds,
     },
   };
 }
@@ -317,8 +373,9 @@ function extractCandidateFromCard(card: HTMLElement): { candidate: VideoCandidat
 function renderShortDurationBadge(card: HTMLElement, durationSeconds: number): void {
   if (!persistedState.policy.showShortDurationBadges) return;
   const thumb =
-    card.querySelector<HTMLElement>('a[href*="/shorts/"], ytd-thumbnail, .shortsLockupViewModelHostThumbnailContainer') ??
-    card;
+    card.querySelector<HTMLElement>(
+      'a[href*="/shorts/"], ytd-thumbnail, .shortsLockupViewModelHostThumbnailContainer',
+    ) ?? card;
 
   let badge = thumb.querySelector<HTMLElement>('.yt-timefit-short-duration');
   if (!badge) {
@@ -382,6 +439,29 @@ function restoreAllCards(): void {
   if (banner) banner.remove();
 }
 
+/**
+ * When hiding long videos collapses feed height, gently nudge YouTube's
+ * infinite-scroll loader so more fitting videos keep loading.
+ */
+function nudgeInfiniteScrollIfSparse(visibleRegularVideos: number): void {
+  if (isWatchPage() || isShortsPage()) return;
+  if (visibleRegularVideos >= 6) {
+    consecutiveScrollNudges = 0;
+    return;
+  }
+  const now = Date.now();
+  if (consecutiveScrollNudges >= 5 || now - lastScrollNudgeMs < 2_500) {
+    return;
+  }
+
+  const continuation = document.querySelector<HTMLElement>('ytd-continuation-item-renderer');
+  if (!continuation) return;
+
+  lastScrollNudgeMs = now;
+  consecutiveScrollNudges += 1;
+  window.dispatchEvent(new Event('scroll'));
+}
+
 function updateFinishLineBanner(snapshot: SessionSnapshot, visibleSidebarCount: number): void {
   const existing = document.getElementById('yt-timefit-finish-banner');
   const shouldShow =
@@ -426,7 +506,6 @@ function evaluateShortsPageEscalation(snapshot: SessionSnapshot): void {
   const shortId = extractShortIdFromHref(window.location.pathname);
   if (!shortId) return;
 
-  // Toggle ON or already locked for this session -> immediate conversion to standard player
   if (snapshot.policy.shortsMode === 'redirectToWatch' || snapshot.shortsLockedForSession) {
     convertCurrentShortToStandardPlayer();
     return;
@@ -543,8 +622,14 @@ function runFullSweep(): void {
   const cards = document.querySelectorAll<HTMLElement>(VIDEO_CARD_SELECTORS);
   const observer = ensureShortObserver();
   let visibleSidebarCount = 0;
+  let visibleRegularCount = 0;
 
   for (const card of cards) {
+    // Skip nested lockup elements whose outer card renderer is already handled
+    if (card.parentElement?.closest(VIDEO_CARD_SELECTORS)) {
+      continue;
+    }
+
     const { candidate, shortId } = extractCandidateFromCard(card);
     if (shortId) {
       card.setAttribute('data-ytb-short-id', shortId);
@@ -559,6 +644,9 @@ function runFullSweep(): void {
     const verdict = evaluateVideoCandidate(candidate, snapshot);
     if (verdict === 'allow') {
       card.removeAttribute('data-ytb-filtered');
+      if (candidate.kind === 'video') {
+        visibleRegularCount += 1;
+      }
       if (card.closest('#related, #secondary')) {
         visibleSidebarCount += 1;
       }
@@ -568,6 +656,7 @@ function runFullSweep(): void {
   }
 
   updateFinishLineBanner(snapshot, visibleSidebarCount);
+  nudgeInfiniteScrollIfSparse(visibleRegularCount);
 }
 
 function attachShortClickInterceptor(): void {
@@ -614,15 +703,14 @@ async function mountYouTubeFilterHost(): Promise<void> {
   checkAutoplayOnWatchPage();
   runFullSweep();
 
-  // Re-evaluate on YouTube SPA navigations
   window.addEventListener('yt-navigate-finish', () => {
+    consecutiveScrollNudges = 0;
     window.setTimeout(() => {
       checkAutoplayOnWatchPage();
       runFullSweep();
     }, 350);
   });
 
-  // Catch infinite scroll & dynamic sidebar cards
   mutationObserver = new MutationObserver(() => {
     scheduleDebouncedSweep();
   });
@@ -631,21 +719,18 @@ async function mountYouTubeFilterHost(): Promise<void> {
     subtree: true,
   });
 
-  // Active 4-second re-evaluation loop while tab is visible
   sweepTimer = window.setInterval(() => {
     if (document.hidden) return;
     checkAutoplayOnWatchPage();
     runFullSweep();
   }, SWEEP_INTERVAL_MS);
 
-  // React to storage updates from popup or other tabs
   webext.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local' || !changes[STATE_KEY]?.newValue) return;
     persistedState = changes[STATE_KEY].newValue as PersistedSessionState;
     runFullSweep();
   });
 
-  // Wake tab if user opens the extension from the toolbar extensions menu
   webext.runtime.onMessage.addListener((msg) => {
     if (msg && typeof msg === 'object' && (msg as { type?: string }).type === 'WAKE_FROM_POPUP') {
       snoozedUntilReloadOrPopup = false;

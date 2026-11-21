@@ -5,9 +5,9 @@
     if (!raw) return null;
     const cleaned = raw.trim();
     if (!cleaned) return null;
-    const colonMatch = cleaned.match(/^(\d{1,2}:)?(\d{1,2}):(\d{2})$/);
+    const colonMatch = cleaned.match(/\b(\d{1,2}:)?(\d{1,2}):(\d{2})\b/);
     if (colonMatch) {
-      const parts = cleaned.split(":").map((p) => Number.parseInt(p, 10));
+      const parts = colonMatch[0].split(":").map((p) => Number.parseInt(p, 10));
       if (parts.some((n) => Number.isNaN(n))) return null;
       if (parts.length === 2) {
         return (parts[0] ?? 0) * 60 + (parts[1] ?? 0);
@@ -16,9 +16,9 @@
         return (parts[0] ?? 0) * 3600 + (parts[1] ?? 0) * 60 + (parts[2] ?? 0);
       }
     }
-    const hoursMatch = cleaned.match(/(\d+)\s+hours?/i);
-    const minsMatch = cleaned.match(/(\d+)\s+minutes?/i);
-    const secsMatch = cleaned.match(/(\d+)\s+seconds?/i);
+    const hoursMatch = cleaned.match(/(\d+)\s+hours?(?!\s+ago\b)/i);
+    const minsMatch = cleaned.match(/(\d+)\s+minutes?(?!\s+ago\b)/i);
+    const secsMatch = cleaned.match(/(\d+)\s+seconds?(?!\s+ago\b)/i);
     if (hoursMatch || minsMatch || secsMatch) {
       const h = hoursMatch ? Number.parseInt(hoursMatch[1] ?? "0", 10) : 0;
       const m = minsMatch ? Number.parseInt(minsMatch[1] ?? "0", 10) : 0;
@@ -192,6 +192,21 @@
     "ytm-video-with-context-renderer",
     "ytm-compact-video-renderer"
   ].join(", ");
+  var DURATION_BADGE_SELECTORS = [
+    "ytd-thumbnail-overlay-time-status-renderer #text",
+    "ytd-thumbnail-overlay-time-status-renderer .badge-shape-wiz__text",
+    "ytd-thumbnail-overlay-time-status-renderer",
+    "yt-thumbnail-overlay-badge-view-model .yt-badge-shape__text",
+    "yt-thumbnail-overlay-badge-view-model .badge-shape-wiz__text",
+    "yt-thumbnail-badge-view-model .yt-badge-shape__text",
+    "yt-thumbnail-badge-view-model .badge-shape-wiz__text",
+    "yt-thumbnail-badge-view-model",
+    "badge-shape .yt-badge-shape__text",
+    "badge-shape .badge-shape-wiz__text",
+    "badge-shape",
+    ".yt-badge-shape__text",
+    ".badge-shape-wiz__text"
+  ].join(", ");
   var SHORTS_NAV_SELECTORS = [
     'ytd-guide-entry-renderer a[title="Shorts"]',
     'ytd-mini-guide-entry-renderer a[title="Shorts"]',
@@ -208,6 +223,8 @@
   var mutationObserver = null;
   var sweepTimer = null;
   var mutationDebounceTimer = null;
+  var lastScrollNudgeMs = 0;
+  var consecutiveScrollNudges = 0;
   function getCurrentSnapshot() {
     return buildSessionSnapshot(persistedState, Date.now(), {
       snoozed: snoozedUntilReloadOrPopup,
@@ -373,6 +390,41 @@
       }
     }
   }
+  function findVideoDurationSeconds(card) {
+    const explicitLive = card.querySelector(
+      '.badge-style-type-live-now-alternate, [overlay-style="LIVE"], ytd-badge-supported-renderer[aria-label*="LIVE"]'
+    );
+    if (explicitLive) {
+      return { seconds: null, isLive: true };
+    }
+    const badges = card.querySelectorAll(DURATION_BADGE_SELECTORS);
+    let sawLiveText = false;
+    for (const el of badges) {
+      if (el.classList.contains("yt-timefit-short-duration")) continue;
+      const text = el.textContent?.trim() ?? "";
+      const aria = el.getAttribute("aria-label")?.trim() ?? "";
+      if (/^\s*live\s*$/i.test(text) || /\blive now\b/i.test(aria)) {
+        sawLiveText = true;
+        continue;
+      }
+      const fromText = parseDurationText(text);
+      if (fromText !== null) return { seconds: fromText, isLive: false };
+      const fromAria = parseDurationText(aria);
+      if (fromAria !== null) return { seconds: fromAria, isLive: false };
+    }
+    if (sawLiveText) {
+      return { seconds: null, isLive: true };
+    }
+    const ariaLinks = card.querySelectorAll('a[aria-label], [id="video-title"][aria-label]');
+    for (const link of ariaLinks) {
+      const aria = link.getAttribute("aria-label");
+      const parsed = parseDurationText(aria);
+      if (parsed !== null) {
+        return { seconds: parsed, isLive: false };
+      }
+    }
+    return { seconds: null, isLive: false };
+  }
   function extractCandidateFromCard(card) {
     const shortLink = card.querySelector('a[href*="/shorts/"]');
     const shortId = shortLink ? extractShortIdFromHref(shortLink.getAttribute("href") ?? "") : null;
@@ -391,38 +443,27 @@
     const href = videoLink?.getAttribute("href") ?? "";
     const idMatch = href.match(/[?&]v=([a-zA-Z0-9_-]{6,})/);
     const videoId = idMatch?.[1] ?? card.getAttribute("data-ytb-id") ?? "unknown";
-    const liveBadge = card.querySelector(
-      '.badge-style-type-live-now-alternate, [overlay-style="LIVE"], ytd-badge-supported-renderer[aria-label*="LIVE"]'
-    );
-    if (liveBadge) {
+    const { seconds, isLive } = findVideoDurationSeconds(card);
+    if (isLive) {
       return {
         shortId: null,
         candidate: { id: videoId, kind: "livestream", durationSeconds: null }
       };
     }
-    const timeEl = card.querySelector(
-      "ytd-thumbnail-overlay-time-status-renderer #text, ytd-thumbnail-overlay-time-status-renderer .badge-shape-wiz__text, badge-shape .badge-shape-wiz__text, .yt-badge-shape__text"
-    );
-    const rawTime = timeEl?.textContent?.trim() ?? timeEl?.getAttribute("aria-label") ?? null;
-    if (rawTime && /live/i.test(rawTime)) {
-      return {
-        shortId: null,
-        candidate: { id: videoId, kind: "livestream", durationSeconds: null }
-      };
-    }
-    const parsedSec = parseDurationText(rawTime);
     return {
       shortId: null,
       candidate: {
         id: videoId,
         kind: "video",
-        durationSeconds: parsedSec
+        durationSeconds: seconds
       }
     };
   }
   function renderShortDurationBadge(card, durationSeconds) {
     if (!persistedState.policy.showShortDurationBadges) return;
-    const thumb = card.querySelector('a[href*="/shorts/"], ytd-thumbnail, .shortsLockupViewModelHostThumbnailContainer') ?? card;
+    const thumb = card.querySelector(
+      'a[href*="/shorts/"], ytd-thumbnail, .shortsLockupViewModelHostThumbnailContainer'
+    ) ?? card;
     let badge = thumb.querySelector(".yt-timefit-short-duration");
     if (!badge) {
       if (getComputedStyle(thumb).position === "static") {
@@ -476,6 +517,22 @@
     }
     const banner = document.getElementById("yt-timefit-finish-banner");
     if (banner) banner.remove();
+  }
+  function nudgeInfiniteScrollIfSparse(visibleRegularVideos) {
+    if (isWatchPage() || isShortsPage()) return;
+    if (visibleRegularVideos >= 6) {
+      consecutiveScrollNudges = 0;
+      return;
+    }
+    const now = Date.now();
+    if (consecutiveScrollNudges >= 5 || now - lastScrollNudgeMs < 2500) {
+      return;
+    }
+    const continuation = document.querySelector("ytd-continuation-item-renderer");
+    if (!continuation) return;
+    lastScrollNudgeMs = now;
+    consecutiveScrollNudges += 1;
+    window.dispatchEvent(new Event("scroll"));
   }
   function updateFinishLineBanner(snapshot, visibleSidebarCount) {
     const existing = document.getElementById("yt-timefit-finish-banner");
@@ -610,7 +667,11 @@
     const cards = document.querySelectorAll(VIDEO_CARD_SELECTORS);
     const observer = ensureShortObserver();
     let visibleSidebarCount = 0;
+    let visibleRegularCount = 0;
     for (const card of cards) {
+      if (card.parentElement?.closest(VIDEO_CARD_SELECTORS)) {
+        continue;
+      }
       const { candidate, shortId } = extractCandidateFromCard(card);
       if (shortId) {
         card.setAttribute("data-ytb-short-id", shortId);
@@ -624,6 +685,9 @@
       const verdict = evaluateVideoCandidate(candidate, snapshot);
       if (verdict === "allow") {
         card.removeAttribute("data-ytb-filtered");
+        if (candidate.kind === "video") {
+          visibleRegularCount += 1;
+        }
         if (card.closest("#related, #secondary")) {
           visibleSidebarCount += 1;
         }
@@ -632,6 +696,7 @@
       }
     }
     updateFinishLineBanner(snapshot, visibleSidebarCount);
+    nudgeInfiniteScrollIfSparse(visibleRegularCount);
   }
   function attachShortClickInterceptor() {
     document.addEventListener(
@@ -670,6 +735,7 @@
     checkAutoplayOnWatchPage();
     runFullSweep();
     window.addEventListener("yt-navigate-finish", () => {
+      consecutiveScrollNudges = 0;
       window.setTimeout(() => {
         checkAutoplayOnWatchPage();
         runFullSweep();
