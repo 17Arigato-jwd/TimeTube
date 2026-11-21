@@ -1,0 +1,16 @@
+{
+  "name": "yt-time-budget-extension",
+  "version": "1.0.0",
+  "description": "Cross-browser (Chrome & Firefox MV3) YouTube extension that dynamically filters videos so you only see ones you can finish before your break ends.",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/build-tests.mjs && node --test dist-tests/*.test.cjs"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.3"
+  }
+}

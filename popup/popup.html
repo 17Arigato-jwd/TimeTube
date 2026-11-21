@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TimeFit for YouTube</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <main class="popup">
+    <header class="header">
+      <h1>TimeFit</h1>
+      <span id="status-pill" class="pill pill-idle">Idle</span>
+    </header>
+
+    <section id="active-banner" class="card active-card hidden">
+      <div class="active-time">
+        <span class="label">Remaining</span>
+        <strong id="remaining-display">--:--</strong>
+      </div>
+      <div class="active-actions">
+        <button id="extend-btn" type="button" class="btn btn-secondary">+5 min</button>
+        <button id="stop-btn" type="button" class="btn btn-danger">Stop</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="mode-tabs" role="tablist">
+        <button type="button" class="tab active" data-mode="countdown">Timer</button>
+        <button type="button" class="tab" data-mode="until">End Time</button>
+        <button type="button" class="tab" data-mode="maxLength">Max Length</button>
+      </div>
+
+      <div id="panel-countdown" class="mode-panel">
+        <div class="presets">
+          <button type="button" class="preset" data-mins="15">15m</button>
+          <button type="button" class="preset" data-mins="25">25m</button>
+          <button type="button" class="preset" data-mins="45">45m</button>
+        </div>
+        <label class="field">
+          <span>Custom minutes</span>
+          <input id="countdown-mins" type="number" min="1" max="360" value="25" />
+        </label>
+      </div>
+
+      <div id="panel-until" class="mode-panel hidden">
+        <label class="field">
+          <span>Break ends at</span>
+          <input id="until-time" type="time" value="17:00" />
+        </label>
+      </div>
+
+      <div id="panel-maxLength" class="mode-panel hidden">
+        <label class="field">
+          <span>Max video length (minutes)</span>
+          <input id="max-length-mins" type="number" min="1" max="240" value="15" />
+        </label>
+      </div>
+
+      <button id="start-btn" type="button" class="btn btn-primary full-width">Start Session</button>
+    </section>
+
+    <section class="card settings">
+      <h2>Guardrails</h2>
+
+      <label class="toggle-row">
+        <span>Disable Shorts (open in standard player)</span>
+        <input id="disable-shorts" type="checkbox" />
+      </label>
+
+      <label class="select-row" id="cutoff-row">
+        <span>Force leave Shorts before end</span>
+        <select id="shorts-cutoff">
+          <option value="5">5 min left</option>
+          <option value="10">10 min left</option>
+        </select>
+      </label>
+
+      <label class="select-row">
+        <span>Unfinishable videos</span>
+        <select id="exceed-action">
+          <option value="hide">Hide completely</option>
+          <option value="dim">Dim thumbnail</option>
+        </select>
+      </label>
+
+      <label class="toggle-row">
+        <span>Hide Shorts sidebar/nav button</span>
+        <input id="hide-shorts-nav" type="checkbox" checked />
+      </label>
+
+      <label class="toggle-row">
+        <span>Show duration badge on Shorts</span>
+        <input id="show-short-durations" type="checkbox" checked />
+      </label>
+    </section>
+  </main>
+
+  <script type="module" src="../dist/popup.js"></script>
+</body>
+</html>

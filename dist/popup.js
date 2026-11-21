@@ -1,0 +1,145 @@
+// src/core/policy.ts
+function computeRemainingMs(state, nowMs) {
+  if (state.status !== "active" || !state.spec || state.spec.mode === "maxLength") {
+    return null;
+  }
+  if (state.endsAtMs === null) return null;
+  return Math.max(0, state.endsAtMs - nowMs);
+}
+
+// src/shared/webext.ts
+var rawApi = globalThis.browser ?? globalThis.chrome;
+var webext = rawApi;
+
+// src/popup/index.ts
+var selectedMode = "countdown";
+var currentState = null;
+var statusPill = document.getElementById("status-pill");
+var activeBanner = document.getElementById("active-banner");
+var remainingDisplay = document.getElementById("remaining-display");
+var extendBtn = document.getElementById("extend-btn");
+var stopBtn = document.getElementById("stop-btn");
+var startBtn = document.getElementById("start-btn");
+var countdownInput = document.getElementById("countdown-mins");
+var untilInput = document.getElementById("until-time");
+var maxLengthInput = document.getElementById("max-length-mins");
+var disableShortsCheckbox = document.getElementById("disable-shorts");
+var shortsCutoffSelect = document.getElementById("shorts-cutoff");
+var cutoffRow = document.getElementById("cutoff-row");
+var exceedActionSelect = document.getElementById("exceed-action");
+var hideShortsNavCheckbox = document.getElementById("hide-shorts-nav");
+var showShortDurationsCheckbox = document.getElementById("show-short-durations");
+function formatMs(ms) {
+  const totalSec = Math.max(0, Math.ceil(ms / 1e3));
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+function setModeTab(mode) {
+  selectedMode = mode;
+  document.querySelectorAll(".tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.mode === mode);
+  });
+  document.getElementById("panel-countdown")?.classList.toggle("hidden", mode !== "countdown");
+  document.getElementById("panel-until")?.classList.toggle("hidden", mode !== "until");
+  document.getElementById("panel-maxLength")?.classList.toggle("hidden", mode !== "maxLength");
+}
+function renderState(state) {
+  currentState = state;
+  const remainingMs = computeRemainingMs(state, Date.now());
+  if (state.status === "active") {
+    statusPill.textContent = state.spec?.mode === "maxLength" ? "Max Length" : "Active";
+    statusPill.className = "pill pill-active";
+    activeBanner.classList.remove("hidden");
+    if (state.spec?.mode === "maxLength") {
+      remainingDisplay.textContent = `\u2264 ${state.spec.maxMinutes}m`;
+      extendBtn.classList.add("hidden");
+    } else {
+      remainingDisplay.textContent = remainingMs !== null ? formatMs(remainingMs) : "--:--";
+      extendBtn.classList.remove("hidden");
+    }
+  } else if (state.status === "expired") {
+    statusPill.textContent = "Break Ended";
+    statusPill.className = "pill pill-expired";
+    activeBanner.classList.remove("hidden");
+    remainingDisplay.textContent = "0:00";
+    extendBtn.classList.remove("hidden");
+  } else {
+    statusPill.textContent = "Idle";
+    statusPill.className = "pill pill-idle";
+    activeBanner.classList.add("hidden");
+  }
+  disableShortsCheckbox.checked = state.policy.shortsMode === "redirectToWatch";
+  cutoffRow.classList.toggle("hidden", state.policy.shortsMode === "redirectToWatch");
+  shortsCutoffSelect.value = String(state.policy.shortsLockCutoffMinutes);
+  exceedActionSelect.value = state.policy.exceedAction;
+  hideShortsNavCheckbox.checked = state.policy.hideShortsNavButton;
+  showShortDurationsCheckbox.checked = state.policy.showShortDurationBadges;
+}
+async function syncPolicy() {
+  const next = await webext.runtime.sendMessage({
+    type: "UPDATE_POLICY",
+    patch: {
+      shortsMode: disableShortsCheckbox.checked ? "redirectToWatch" : "escalatingNudge",
+      shortsLockCutoffMinutes: Number(shortsCutoffSelect.value) === 10 ? 10 : 5,
+      exceedAction: exceedActionSelect.value === "dim" ? "dim" : "hide",
+      hideShortsNavButton: hideShortsNavCheckbox.checked,
+      showShortDurationBadges: showShortDurationsCheckbox.checked
+    }
+  });
+  renderState(next);
+}
+async function initPopup() {
+  await webext.runtime.sendMessage({ type: "WAKE_FROM_POPUP" }).catch(() => void 0);
+  const state = await webext.runtime.sendMessage({ type: "GET_STATE" });
+  renderState(state);
+  document.querySelectorAll(".tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const mode = btn.dataset.mode;
+      if (mode) setModeTab(mode);
+    });
+  });
+  document.querySelectorAll(".preset").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.dataset.mins) countdownInput.value = btn.dataset.mins;
+    });
+  });
+  startBtn.addEventListener("click", async () => {
+    let spec;
+    if (selectedMode === "countdown") {
+      spec = { mode: "countdown", durationMinutes: Math.max(1, Number(countdownInput.value) || 25) };
+    } else if (selectedMode === "until") {
+      spec = { mode: "until", endTime: untilInput.value || "17:00" };
+    } else {
+      spec = { mode: "maxLength", maxMinutes: Math.max(1, Number(maxLengthInput.value) || 15) };
+    }
+    const next = await webext.runtime.sendMessage({
+      type: "START_SESSION",
+      spec
+    });
+    renderState(next);
+  });
+  extendBtn.addEventListener("click", async () => {
+    const next = await webext.runtime.sendMessage({
+      type: "EXTEND_SESSION",
+      additionalMinutes: 5
+    });
+    renderState(next);
+  });
+  stopBtn.addEventListener("click", async () => {
+    const next = await webext.runtime.sendMessage({
+      type: "STOP_SESSION"
+    });
+    renderState(next);
+  });
+  disableShortsCheckbox.addEventListener("change", syncPolicy);
+  shortsCutoffSelect.addEventListener("change", syncPolicy);
+  exceedActionSelect.addEventListener("change", syncPolicy);
+  hideShortsNavCheckbox.addEventListener("change", syncPolicy);
+  showShortDurationsCheckbox.addEventListener("change", syncPolicy);
+  window.setInterval(() => {
+    if (currentState) renderState(currentState);
+  }, 1e3);
+}
+initPopup();
+//# sourceMappingURL=popup.js.map
