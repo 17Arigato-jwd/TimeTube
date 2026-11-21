@@ -256,8 +256,10 @@
   var autoplayObserved = "unknown";
   var autoplayGuideActive = false;
   var activeModalId = null;
+  var modalTimerInterval = null;
   var expiredScreenRendered = false;
   var mediaListenersAttached = false;
+  var inputBlockerAttached = false;
   var ignorePauseUntilMs = 0;
   var choseKeepTimerGoing = false;
   var timerPausedByVideo = false;
@@ -315,6 +317,15 @@
     if (secs === 0) return `${mins}m`;
     return `${mins}m ${secs}s`;
   }
+  function formatCountdownClock(ms) {
+    const totalSec = Math.max(0, Math.ceil(ms / 1e3));
+    const hours = Math.floor(totalSec / 3600);
+    const mins = Math.floor(totalSec % 3600 / 60);
+    const secs = totalSec % 60;
+    const pad = (n) => String(n).padStart(2, "0");
+    if (hours > 0) return `${hours}:${pad(mins)}:${pad(secs)}`;
+    return `${mins}:${pad(secs)}`;
+  }
   function formatSpeed(speed) {
     return `${Number(speed.toFixed(2))}\xD7`;
   }
@@ -343,9 +354,47 @@
     if (!video) return;
     video.play().catch(() => void 0);
   }
+  function attachModalInputBlocker() {
+    if (inputBlockerAttached) return;
+    inputBlockerAttached = true;
+    const blockKeyboard = (event) => {
+      if (activeModalId === null) return;
+      const modalRoot = document.getElementById("yt-timefit-modal-root");
+      if (!modalRoot) return;
+      const target = event.target;
+      const insideModalBtn = Boolean(target && modalRoot.contains(target) && target.tagName === "BUTTON");
+      if (insideModalBtn && (event.key === "Tab" || event.key === "Enter")) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
+    window.addEventListener("keydown", blockKeyboard, true);
+    window.addEventListener("keyup", blockKeyboard, true);
+    window.addEventListener("keypress", blockKeyboard, true);
+    const blockOutsidePointer = (event) => {
+      if (activeModalId === null) return;
+      const modalRoot = document.getElementById("yt-timefit-modal-root");
+      if (!modalRoot) return;
+      const target = event.target;
+      if (target && modalRoot.contains(target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
+    window.addEventListener("mousedown", blockOutsidePointer, true);
+    window.addEventListener("click", blockOutsidePointer, true);
+    window.addEventListener("wheel", blockOutsidePointer, { capture: true, passive: false });
+  }
   function removeModal() {
+    if (modalTimerInterval !== null) {
+      window.clearInterval(modalTimerInterval);
+      modalTimerInterval = null;
+    }
     const existing = document.getElementById("yt-timefit-modal-root");
     if (existing) existing.remove();
+    document.documentElement.classList.remove("yt-timefit-modal-open");
     activeModalId = null;
   }
   function showModal(id, title, body, actions) {
@@ -354,30 +403,57 @@
     }
     removeModal();
     activeModalId = id;
+    document.documentElement.classList.add("yt-timefit-modal-open");
     const root = document.createElement("div");
     root.id = "yt-timefit-modal-root";
     root.className = "yt-timefit-backdrop";
+    root.setAttribute("role", "dialog");
+    root.setAttribute("aria-modal", "true");
     const card = document.createElement("div");
     card.className = "yt-timefit-modal";
+    const headerRow = document.createElement("div");
+    headerRow.className = "yt-timefit-modal-header";
     const heading = document.createElement("h2");
     heading.textContent = title;
+    headerRow.appendChild(heading);
+    const timerPill = document.createElement("span");
+    timerPill.className = "yt-timefit-modal-timer";
+    headerRow.appendChild(timerPill);
+    const refreshModalTimer = () => {
+      const snap = getCurrentSnapshot();
+      if (snap.status === "expired") {
+        runFullSweep();
+        return;
+      }
+      if (snap.remainingMs !== null) {
+        timerPill.style.display = "";
+        timerPill.textContent = snap.status === "paused" ? `Paused \xB7 ${formatCountdownClock(snap.remainingMs)}` : `Time left \xB7 ${formatCountdownClock(snap.remainingMs)}`;
+      } else {
+        timerPill.style.display = "none";
+      }
+    };
+    refreshModalTimer();
+    modalTimerInterval = window.setInterval(refreshModalTimer, 500);
     const text = document.createElement("p");
     text.textContent = body;
     const btnRow = document.createElement("div");
     btnRow.className = "yt-timefit-actions";
+    let firstButton = null;
     for (const act of actions) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.textContent = act.label;
       btn.className = `yt-timefit-btn yt-timefit-btn-${act.variant}`;
       btn.addEventListener("click", act.onClick);
+      if (!firstButton) firstButton = btn;
       btnRow.appendChild(btn);
     }
-    card.appendChild(heading);
+    card.appendChild(headerRow);
     card.appendChild(text);
     card.appendChild(btnRow);
     root.appendChild(card);
     document.documentElement.appendChild(root);
+    firstButton?.focus();
   }
   function clearEarlyCutoffBar() {
     const existing = document.getElementById("yt-timefit-cutoff-bar");
@@ -511,9 +587,8 @@
           if (snapshot.spec?.mode !== "countdown") {
             return;
           }
-          const breakText = formatHumanDuration(snapshot.remainingMs / 1e3);
           const vidRem = Math.max(0, video.duration - video.currentTime);
-          const body = vidRem > 0 ? `You have ${breakText} left on your timer and ${formatHumanDuration(vidRem)} left in this video.` : `You have ${breakText} left on your timer.`;
+          const body = vidRem > 0 ? `Choose whether to pause your break timer while this video (${formatHumanDuration(vidRem)} left) is paused, or keep the timer running.` : "Choose whether to pause your break timer while the video is paused, or keep it running.";
           showModal("pause_timer_choice", "Video paused \u2014 pause your timer too?", body, [
             {
               label: "Pause timer",
@@ -547,12 +622,14 @@
       async (event) => {
         if (!isMainPlayerVideo(event.target)) return;
         const video = event.target;
+        if (activeModalId !== null) {
+          ignorePauseUntilMs = Date.now() + 500;
+          video.pause();
+          return;
+        }
         if (pausePromptTimer !== null) {
           window.clearTimeout(pausePromptTimer);
           pausePromptTimer = null;
-        }
-        if (activeModalId === "pause_timer_choice") {
-          removeModal();
         }
         if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
         if (timerPausedByVideo || persistedState.status === "paused") {
@@ -1120,6 +1197,7 @@
     } catch {
       persistedState = { ...INITIAL_PERSISTED_STATE };
     }
+    attachModalInputBlocker();
     attachShortClickInterceptor();
     attachDocumentMediaListeners();
     checkAutoplayOnWatchPage();
@@ -1160,6 +1238,7 @@
       if (sweepTimer !== null) window.clearInterval(sweepTimer);
       if (exactExpiryTimer !== null) window.clearTimeout(exactExpiryTimer);
       if (pausePromptTimer !== null) window.clearTimeout(pausePromptTimer);
+      if (modalTimerInterval !== null) window.clearInterval(modalTimerInterval);
       mutationObserver?.disconnect();
       shortObserver?.disconnect();
     });

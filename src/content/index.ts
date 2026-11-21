@@ -62,10 +62,12 @@ let snoozedUntilReloadOrPopup = false;
 let autoplayObserved: AutoplayObservedState = 'unknown';
 let autoplayGuideActive = false;
 let activeModalId: string | null = null;
+let modalTimerInterval: number | null = null;
 let expiredScreenRendered = false;
 
 // Watch & Shorts player pause / overrun tracking
 let mediaListenersAttached = false;
+let inputBlockerAttached = false;
 let ignorePauseUntilMs = 0;
 let choseKeepTimerGoing = false;
 let timerPausedByVideo = false;
@@ -111,7 +113,6 @@ function getActiveMediaId(): string | null {
 function isMainPlayerVideo(el: EventTarget | null): el is HTMLVideoElement {
   if (!(el instanceof HTMLVideoElement)) return false;
   if (!isWatchPage() && !isShortsPage()) return false;
-  // Ignore tiny hidden preloader/hover videos that have no loaded duration
   if (!Number.isFinite(el.duration) || el.duration <= 0) return false;
   if (isWatchPage()) {
     return Boolean(
@@ -119,7 +120,6 @@ function isMainPlayerVideo(el: EventTarget | null): el is HTMLVideoElement {
         el.closest('#movie_player, .html5-video-player, ytd-player'),
     );
   }
-  // Shorts player
   return Boolean(
     el.closest('#shorts-player, ytd-reel-video-renderer, .html5-video-player') ||
       el.classList.contains('html5-main-video'),
@@ -133,6 +133,16 @@ function formatHumanDuration(totalSeconds: number): string {
   if (mins === 0) return `${secs}s`;
   if (secs === 0) return `${mins}m`;
   return `${mins}m ${secs}s`;
+}
+
+function formatCountdownClock(ms: number): string {
+  const totalSec = Math.max(0, Math.ceil(ms / 1000));
+  const hours = Math.floor(totalSec / 3600);
+  const mins = Math.floor((totalSec % 3600) / 60);
+  const secs = totalSec % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  if (hours > 0) return `${hours}:${pad(mins)}:${pad(secs)}`;
+  return `${mins}:${pad(secs)}`;
 }
 
 function formatSpeed(speed: number): string {
@@ -171,9 +181,61 @@ function resumeVideo(video: HTMLVideoElement | null): void {
   video.play().catch(() => undefined);
 }
 
+/**
+ * Blocks ALL keyboard shortcuts (k, Space, j, l, f, arrows, etc.) and outside pointer/wheel
+ * events while any TimeFit prompt is active so the user must answer the prompt first.
+ */
+function attachModalInputBlocker(): void {
+  if (inputBlockerAttached) return;
+  inputBlockerAttached = true;
+
+  const blockKeyboard = (event: KeyboardEvent) => {
+    if (activeModalId === null) return;
+    const modalRoot = document.getElementById('yt-timefit-modal-root');
+    if (!modalRoot) return;
+
+    const target = event.target as HTMLElement | null;
+    const insideModalBtn = Boolean(target && modalRoot.contains(target) && target.tagName === 'BUTTON');
+
+    // Allow Tab navigation and Enter on our modal buttons only; block Space, k, and all other keys
+    if (insideModalBtn && (event.key === 'Tab' || event.key === 'Enter')) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+  };
+
+  window.addEventListener('keydown', blockKeyboard, true);
+  window.addEventListener('keyup', blockKeyboard, true);
+  window.addEventListener('keypress', blockKeyboard, true);
+
+  const blockOutsidePointer = (event: Event) => {
+    if (activeModalId === null) return;
+    const modalRoot = document.getElementById('yt-timefit-modal-root');
+    if (!modalRoot) return;
+    const target = event.target as Node | null;
+    if (target && modalRoot.contains(target)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+  };
+
+  window.addEventListener('mousedown', blockOutsidePointer, true);
+  window.addEventListener('click', blockOutsidePointer, true);
+  window.addEventListener('wheel', blockOutsidePointer, { capture: true, passive: false });
+}
+
 function removeModal(): void {
+  if (modalTimerInterval !== null) {
+    window.clearInterval(modalTimerInterval);
+    modalTimerInterval = null;
+  }
   const existing = document.getElementById('yt-timefit-modal-root');
   if (existing) existing.remove();
+  document.documentElement.classList.remove('yt-timefit-modal-open');
   activeModalId = null;
 }
 
@@ -188,16 +250,46 @@ function showModal(
   }
   removeModal();
   activeModalId = id;
+  document.documentElement.classList.add('yt-timefit-modal-open');
 
   const root = document.createElement('div');
   root.id = 'yt-timefit-modal-root';
   root.className = 'yt-timefit-backdrop';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
 
   const card = document.createElement('div');
   card.className = 'yt-timefit-modal';
 
+  const headerRow = document.createElement('div');
+  headerRow.className = 'yt-timefit-modal-header';
+
   const heading = document.createElement('h2');
   heading.textContent = title;
+  headerRow.appendChild(heading);
+
+  const timerPill = document.createElement('span');
+  timerPill.className = 'yt-timefit-modal-timer';
+  headerRow.appendChild(timerPill);
+
+  const refreshModalTimer = () => {
+    const snap = getCurrentSnapshot();
+    if (snap.status === 'expired') {
+      runFullSweep();
+      return;
+    }
+    if (snap.remainingMs !== null) {
+      timerPill.style.display = '';
+      timerPill.textContent =
+        snap.status === 'paused'
+          ? `Paused · ${formatCountdownClock(snap.remainingMs)}`
+          : `Time left · ${formatCountdownClock(snap.remainingMs)}`;
+    } else {
+      timerPill.style.display = 'none';
+    }
+  };
+  refreshModalTimer();
+  modalTimerInterval = window.setInterval(refreshModalTimer, 500);
 
   const text = document.createElement('p');
   text.textContent = body;
@@ -205,20 +297,25 @@ function showModal(
   const btnRow = document.createElement('div');
   btnRow.className = 'yt-timefit-actions';
 
+  let firstButton: HTMLButtonElement | null = null;
   for (const act of actions) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.textContent = act.label;
     btn.className = `yt-timefit-btn yt-timefit-btn-${act.variant}`;
     btn.addEventListener('click', act.onClick);
+    if (!firstButton) firstButton = btn;
     btnRow.appendChild(btn);
   }
 
-  card.appendChild(heading);
+  card.appendChild(headerRow);
   card.appendChild(text);
   card.appendChild(btnRow);
   root.appendChild(card);
   document.documentElement.appendChild(root);
+
+  // Move focus away from the YouTube player into the modal
+  firstButton?.focus();
 }
 
 function clearEarlyCutoffBar(): void {
@@ -355,10 +452,6 @@ function evaluateMediaOverrun(video: HTMLVideoElement, trigger: 'resume' | 'dire
   showModal(`overrun_${videoId}`, "This video won't finish before time is up", body, actions);
 }
 
-/**
- * Uses document-level capture-phase listeners so pause/play work reliably on EVERY
- * Watch video and Short, even when YouTube swaps or recycles <video> elements.
- */
 function attachDocumentMediaListeners(): void {
   if (mediaListenersAttached) return;
   mediaListenersAttached = true;
@@ -384,23 +477,20 @@ function attachDocumentMediaListeners(): void {
           return;
         }
 
-        // For hard clock deadlines ("until"), timer keeps running; check overrun on resume
         if (snapshot.spec?.mode === 'until') {
           choseKeepTimerGoing = true;
           return;
         }
 
-        // For countdown timers, prompt user to either pause the timer or keep it going
         if (snapshot.spec?.mode !== 'countdown') {
           return;
         }
 
-        const breakText = formatHumanDuration(snapshot.remainingMs / 1000);
         const vidRem = Math.max(0, video.duration - video.currentTime);
         const body =
           vidRem > 0
-            ? `You have ${breakText} left on your timer and ${formatHumanDuration(vidRem)} left in this video.`
-            : `You have ${breakText} left on your timer.`;
+            ? `Choose whether to pause your break timer while this video (${formatHumanDuration(vidRem)} left) is paused, or keep the timer running.`
+            : 'Choose whether to pause your break timer while the video is paused, or keep it running.';
 
         showModal('pause_timer_choice', 'Video paused — pause your timer too?', body, [
           {
@@ -437,12 +527,16 @@ function attachDocumentMediaListeners(): void {
       if (!isMainPlayerVideo(event.target)) return;
       const video = event.target;
 
+      // Never allow unpausing while any prompt is unanswered (covers media keys, PiP, etc.)
+      if (activeModalId !== null) {
+        ignorePauseUntilMs = Date.now() + 500;
+        video.pause();
+        return;
+      }
+
       if (pausePromptTimer !== null) {
         window.clearTimeout(pausePromptTimer);
         pausePromptTimer = null;
-      }
-      if (activeModalId === 'pause_timer_choice') {
-        removeModal();
       }
 
       if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
@@ -1123,6 +1217,7 @@ async function mountYouTubeFilterHost(): Promise<void> {
     persistedState = { ...INITIAL_PERSISTED_STATE };
   }
 
+  attachModalInputBlocker();
   attachShortClickInterceptor();
   attachDocumentMediaListeners();
   checkAutoplayOnWatchPage();
@@ -1169,6 +1264,7 @@ async function mountYouTubeFilterHost(): Promise<void> {
     if (sweepTimer !== null) window.clearInterval(sweepTimer);
     if (exactExpiryTimer !== null) window.clearTimeout(exactExpiryTimer);
     if (pausePromptTimer !== null) window.clearTimeout(pausePromptTimer);
+    if (modalTimerInterval !== null) window.clearInterval(modalTimerInterval);
     mutationObserver?.disconnect();
     shortObserver?.disconnect();
   });
