@@ -264,6 +264,7 @@
   var choseKeepTimerGoing = false;
   var timerPausedByVideo = false;
   var pausePromptTimer = null;
+  var seekOverrunTimer = null;
   var lastDirectCheckedVideoId = null;
   var acceptedEarlyCutoffVideoId = null;
   var resolvedShortDurations = /* @__PURE__ */ new Map();
@@ -493,6 +494,7 @@
   }
   function evaluateMediaOverrun(video, trigger) {
     if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
+    if (activeModalId !== null) return;
     const videoId = getActiveMediaId();
     if (!videoId) return;
     const snapshot = getCurrentSnapshot();
@@ -511,7 +513,7 @@
       }
       return;
     }
-    if (trigger === "direct_link" && acceptedEarlyCutoffVideoId === videoId) {
+    if ((trigger === "direct_link" || trigger === "seek_back" || trigger === "rate_change") && acceptedEarlyCutoffVideoId === videoId) {
       updateEarlyCutoffBar(video, snapshot);
       return;
     }
@@ -558,7 +560,7 @@
       }
     });
     const body = `There is ${formatHumanDuration(analysis.videoRemainingSeconds)} left in this video, but only ${formatHumanDuration(analysis.breakRemainingSeconds)} left on your timer.` + (analysis.suggestedSpeed === null ? " Even at 2\xD7 speed, it will run past your break." : "");
-    showModal(`overrun_${videoId}`, "This video won't finish before time is up", body, actions);
+    showModal(`overrun_${videoId}_${trigger}`, "This video won't finish before time is up", body, actions);
   }
   function attachDocumentMediaListeners() {
     if (mediaListenersAttached) return;
@@ -666,18 +668,27 @@
       true
     );
     document.addEventListener(
-      "ratechange",
+      "seeked",
       (event) => {
         if (!isMainPlayerVideo(event.target)) return;
-        updateEarlyCutoffBar(event.target, getCurrentSnapshot());
+        const video = event.target;
+        updateEarlyCutoffBar(video, getCurrentSnapshot());
+        if (seekOverrunTimer !== null) window.clearTimeout(seekOverrunTimer);
+        seekOverrunTimer = window.setTimeout(() => {
+          seekOverrunTimer = null;
+          if (video.seeking || video.ended) return;
+          evaluateMediaOverrun(video, "seek_back");
+        }, 300);
       },
       true
     );
     document.addEventListener(
-      "seeked",
+      "ratechange",
       (event) => {
         if (!isMainPlayerVideo(event.target)) return;
-        updateEarlyCutoffBar(event.target, getCurrentSnapshot());
+        const video = event.target;
+        updateEarlyCutoffBar(video, getCurrentSnapshot());
+        evaluateMediaOverrun(video, "rate_change");
       },
       true
     );
@@ -1238,6 +1249,7 @@
       if (sweepTimer !== null) window.clearInterval(sweepTimer);
       if (exactExpiryTimer !== null) window.clearTimeout(exactExpiryTimer);
       if (pausePromptTimer !== null) window.clearTimeout(pausePromptTimer);
+      if (seekOverrunTimer !== null) window.clearTimeout(seekOverrunTimer);
       if (modalTimerInterval !== null) window.clearInterval(modalTimerInterval);
       mutationObserver?.disconnect();
       shortObserver?.disconnect();

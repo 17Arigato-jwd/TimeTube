@@ -65,13 +65,14 @@ let activeModalId: string | null = null;
 let modalTimerInterval: number | null = null;
 let expiredScreenRendered = false;
 
-// Watch & Shorts player pause / overrun tracking
+// Watch & Shorts player pause / seek / overrun tracking
 let mediaListenersAttached = false;
 let inputBlockerAttached = false;
 let ignorePauseUntilMs = 0;
 let choseKeepTimerGoing = false;
 let timerPausedByVideo = false;
 let pausePromptTimer: number | null = null;
+let seekOverrunTimer: number | null = null;
 let lastDirectCheckedVideoId: string | null = null;
 let acceptedEarlyCutoffVideoId: string | null = null;
 
@@ -181,10 +182,6 @@ function resumeVideo(video: HTMLVideoElement | null): void {
   video.play().catch(() => undefined);
 }
 
-/**
- * Blocks ALL keyboard shortcuts (k, Space, j, l, f, arrows, etc.) and outside pointer/wheel
- * events while any TimeFit prompt is active so the user must answer the prompt first.
- */
 function attachModalInputBlocker(): void {
   if (inputBlockerAttached) return;
   inputBlockerAttached = true;
@@ -197,7 +194,6 @@ function attachModalInputBlocker(): void {
     const target = event.target as HTMLElement | null;
     const insideModalBtn = Boolean(target && modalRoot.contains(target) && target.tagName === 'BUTTON');
 
-    // Allow Tab navigation and Enter on our modal buttons only; block Space, k, and all other keys
     if (insideModalBtn && (event.key === 'Tab' || event.key === 'Enter')) {
       return;
     }
@@ -314,7 +310,6 @@ function showModal(
   root.appendChild(card);
   document.documentElement.appendChild(root);
 
-  // Move focus away from the YouTube player into the modal
   firstButton?.focus();
 }
 
@@ -369,8 +364,12 @@ function updateEarlyCutoffBar(video: HTMLVideoElement | null, snapshot: SessionS
   bar.title = `Break timer ends at ${formatDurationBadge(analysis.cutoffVideoSeconds)}`;
 }
 
-function evaluateMediaOverrun(video: HTMLVideoElement, trigger: 'resume' | 'direct_link'): void {
+function evaluateMediaOverrun(
+  video: HTMLVideoElement,
+  trigger: 'resume' | 'direct_link' | 'seek_back' | 'rate_change',
+): void {
   if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
+  if (activeModalId !== null) return;
   const videoId = getActiveMediaId();
   if (!videoId) return;
 
@@ -393,7 +392,11 @@ function evaluateMediaOverrun(video: HTMLVideoElement, trigger: 'resume' | 'dire
     return;
   }
 
-  if (trigger === 'direct_link' && acceptedEarlyCutoffVideoId === videoId) {
+  // If user already accepted early cutoff on this video, keep updating the red bar instead of re-prompting
+  if (
+    (trigger === 'direct_link' || trigger === 'seek_back' || trigger === 'rate_change') &&
+    acceptedEarlyCutoffVideoId === videoId
+  ) {
     updateEarlyCutoffBar(video, snapshot);
     return;
   }
@@ -449,7 +452,7 @@ function evaluateMediaOverrun(video: HTMLVideoElement, trigger: 'resume' | 'dire
     `but only ${formatHumanDuration(analysis.breakRemainingSeconds)} left on your timer.` +
     (analysis.suggestedSpeed === null ? ' Even at 2× speed, it will run past your break.' : '');
 
-  showModal(`overrun_${videoId}`, "This video won't finish before time is up", body, actions);
+  showModal(`overrun_${videoId}_${trigger}`, "This video won't finish before time is up", body, actions);
 }
 
 function attachDocumentMediaListeners(): void {
@@ -527,7 +530,6 @@ function attachDocumentMediaListeners(): void {
       if (!isMainPlayerVideo(event.target)) return;
       const video = event.target;
 
-      // Never allow unpausing while any prompt is unanswered (covers media keys, PiP, etc.)
       if (activeModalId !== null) {
         ignorePauseUntilMs = Date.now() + 500;
         video.pause();
@@ -578,20 +580,32 @@ function attachDocumentMediaListeners(): void {
     true,
   );
 
-  document.addEventListener(
-    'ratechange',
-    (event) => {
-      if (!isMainPlayerVideo(event.target)) return;
-      updateEarlyCutoffBar(event.target, getCurrentSnapshot());
-    },
-    true,
-  );
-
+  // Re-evaluate whenever the user skips backwards / jumps to an earlier timestamp
   document.addEventListener(
     'seeked',
     (event) => {
       if (!isMainPlayerVideo(event.target)) return;
-      updateEarlyCutoffBar(event.target, getCurrentSnapshot());
+      const video = event.target;
+      updateEarlyCutoffBar(video, getCurrentSnapshot());
+
+      if (seekOverrunTimer !== null) window.clearTimeout(seekOverrunTimer);
+      seekOverrunTimer = window.setTimeout(() => {
+        seekOverrunTimer = null;
+        if (video.seeking || video.ended) return;
+        evaluateMediaOverrun(video, 'seek_back');
+      }, 300);
+    },
+    true,
+  );
+
+  // Re-evaluate if user slows down playback speed so the video now overruns
+  document.addEventListener(
+    'ratechange',
+    (event) => {
+      if (!isMainPlayerVideo(event.target)) return;
+      const video = event.target;
+      updateEarlyCutoffBar(video, getCurrentSnapshot());
+      evaluateMediaOverrun(video, 'rate_change');
     },
     true,
   );
@@ -1264,6 +1278,7 @@ async function mountYouTubeFilterHost(): Promise<void> {
     if (sweepTimer !== null) window.clearInterval(sweepTimer);
     if (exactExpiryTimer !== null) window.clearTimeout(exactExpiryTimer);
     if (pausePromptTimer !== null) window.clearTimeout(pausePromptTimer);
+    if (seekOverrunTimer !== null) window.clearTimeout(seekOverrunTimer);
     if (modalTimerInterval !== null) window.clearInterval(modalTimerInterval);
     mutationObserver?.disconnect();
     shortObserver?.disconnect();
