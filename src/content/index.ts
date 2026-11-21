@@ -61,12 +61,14 @@ let snoozedUntilReloadOrPopup = false;
 let autoplayObserved: AutoplayObservedState = 'unknown';
 let autoplayGuideActive = false;
 let activeModalId: string | null = null;
+let expiredScreenRendered = false;
 
 const resolvedShortDurations = new Map<string, number>();
 const pendingShortIds = new Set<string>();
 let shortObserver: IntersectionObserver | null = null;
 let mutationObserver: MutationObserver | null = null;
 let sweepTimer: number | null = null;
+let exactExpiryTimer: number | null = null;
 let mutationDebounceTimer: number | null = null;
 let lastScrollNudgeMs = 0;
 let consecutiveScrollNudges = 0;
@@ -102,9 +104,11 @@ function readAutoplayToggleState(): AutoplayObservedState {
 }
 
 function pauseActiveVideo(): void {
-  const video = document.querySelector<HTMLVideoElement>('video.html5-main-video, video');
-  if (video && !video.paused) {
-    video.pause();
+  const videos = document.querySelectorAll<HTMLVideoElement>('video');
+  for (const video of videos) {
+    if (!video.paused) {
+      video.pause();
+    }
   }
 }
 
@@ -156,6 +160,81 @@ function showModal(
   card.appendChild(btnRow);
   root.appendChild(card);
   document.documentElement.appendChild(root);
+}
+
+/**
+ * Deletes all YouTube page elements, resets the URL to youtube.com, and displays
+ * a clean full-screen "Time is up" message.
+ */
+function renderExpiredTakeover(): void {
+  pauseActiveVideo();
+  removeModal();
+
+  // Disconnect observers so YouTube scripts can't re-trigger sweeps
+  mutationObserver?.disconnect();
+  shortObserver?.disconnect();
+
+  // Reset URL to youtube.com root without a flash reload
+  if (window.location.pathname !== '/' || window.location.search || window.location.hash) {
+    try {
+      window.history.replaceState(null, '', '/');
+    } catch {
+      // Fallback if history API is restricted
+    }
+  }
+  document.title = "Time's up — TimeFit";
+
+  if (expiredScreenRendered && document.getElementById('yt-timefit-expired-screen')) {
+    return;
+  }
+  expiredScreenRendered = true;
+
+  // Stop any media/audio before clearing the DOM
+  const mediaEls = document.querySelectorAll<HTMLMediaElement>('video, audio');
+  for (const media of mediaEls) {
+    media.pause();
+    media.muted = true;
+    media.removeAttribute('src');
+  }
+
+  // Delete all existing elements on the page
+  if (document.body) {
+    document.body.replaceChildren();
+    document.body.className = 'yt-timefit-expired-body';
+  }
+
+  const screen = document.createElement('main');
+  screen.id = 'yt-timefit-expired-screen';
+  screen.className = 'yt-timefit-expired-screen';
+
+  const card = document.createElement('div');
+  card.className = 'yt-timefit-expired-card';
+
+  const title = document.createElement('h1');
+  title.textContent = "Time's up :)";
+
+  const message = document.createElement('p');
+  message.textContent = 'Your YouTube break has ended. You can start a new session or stop the timer from the TimeFit extension menu whenever you are ready.';
+
+  card.appendChild(title);
+  card.appendChild(message);
+  screen.appendChild(card);
+  document.body?.appendChild(screen);
+}
+
+function scheduleExactExpiryTrigger(snapshot: SessionSnapshot): void {
+  if (exactExpiryTimer !== null) {
+    window.clearTimeout(exactExpiryTimer);
+    exactExpiryTimer = null;
+  }
+  if (snapshot.status === 'active' && snapshot.remainingMs !== null && snapshot.remainingMs > 0) {
+    // Cap timeout delay to 24h to stay well within 32-bit timer limits
+    const delay = Math.min(snapshot.remainingMs + 50, 24 * 60 * 60_000);
+    exactExpiryTimer = window.setTimeout(() => {
+      exactExpiryTimer = null;
+      runFullSweep();
+    }, delay);
+  }
 }
 
 function showAutoplaySetupPrompt(reason: 'initial' | 'detected_enabled'): void {
@@ -222,7 +301,7 @@ function highlightAutoplayToggle(): void {
 }
 
 function checkAutoplayOnWatchPage(): void {
-  if (snoozedUntilReloadOrPopup) return;
+  if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
   if (!isWatchPage()) {
     autoplayObserved = 'unknown';
     return;
@@ -266,6 +345,7 @@ function checkAutoplayOnWatchPage(): void {
 }
 
 function syncShortsNavVisibility(): void {
+  if (expiredScreenRendered) return;
   const shouldHideNav = !snoozedUntilReloadOrPopup && persistedState.policy.hideShortsNavButton;
   for (const selector of SHORTS_NAV_SELECTORS) {
     const matches = document.querySelectorAll<HTMLElement>(selector);
@@ -282,10 +362,6 @@ function syncShortsNavVisibility(): void {
   }
 }
 
-/**
- * Scans ALL badge elements on a video card (skipping non-duration pills like "New" or "4K")
- * and falls back to title/link aria-labels to reliably extract video duration.
- */
 function findVideoDurationSeconds(card: HTMLElement): { seconds: number | null; isLive: boolean } {
   const explicitLive = card.querySelector(
     '.badge-style-type-live-now-alternate, [overlay-style="LIVE"], ytd-badge-supported-renderer[aria-label*="LIVE"]',
@@ -297,7 +373,6 @@ function findVideoDurationSeconds(card: HTMLElement): { seconds: number | null; 
   const badges = card.querySelectorAll<HTMLElement>(DURATION_BADGE_SELECTORS);
   let sawLiveText = false;
   for (const el of badges) {
-    // Ignore our own injected Short duration pill if any
     if (el.classList.contains('yt-timefit-short-duration')) continue;
     const text = el.textContent?.trim() ?? '';
     const aria = el.getAttribute('aria-label')?.trim() ?? '';
@@ -318,7 +393,6 @@ function findVideoDurationSeconds(card: HTMLElement): { seconds: number | null; 
     return { seconds: null, isLive: true };
   }
 
-  // Fallback: YouTube frequently embeds duration in the title/thumbnail link's aria-label
   const ariaLinks = card.querySelectorAll<HTMLElement>('a[aria-label], [id="video-title"][aria-label]');
   for (const link of ariaLinks) {
     const aria = link.getAttribute('aria-label');
@@ -439,10 +513,6 @@ function restoreAllCards(): void {
   if (banner) banner.remove();
 }
 
-/**
- * When hiding long videos collapses feed height, gently nudge YouTube's
- * infinite-scroll loader so more fitting videos keep loading.
- */
 function nudgeInfiniteScrollIfSparse(visibleRegularVideos: number): void {
   if (isWatchPage() || isShortsPage()) return;
   if (visibleRegularVideos >= 6) {
@@ -598,14 +668,27 @@ function evaluateShortsPageEscalation(snapshot: SessionSnapshot): void {
 }
 
 function runFullSweep(): void {
+  const snapshot = getCurrentSnapshot();
+
+  // If the user extended or stopped the session after the expired takeover, reload YouTube cleanly
+  if (expiredScreenRendered && snapshot.status !== 'expired') {
+    window.location.reload();
+    return;
+  }
+
+  // As soon as the timer ends, wipe the screen, set URL to youtube.com, and show "Time's up :)"
+  if (!snoozedUntilReloadOrPopup && snapshot.status === 'expired') {
+    renderExpiredTakeover();
+    return;
+  }
+
+  scheduleExactExpiryTrigger(snapshot);
   syncShortsNavVisibility();
 
   if (snoozedUntilReloadOrPopup) {
     restoreAllCards();
     return;
   }
-
-  const snapshot = getCurrentSnapshot();
 
   if (snapshot.status === 'needs_autoplay_setup' && persistedState.autoplayOnboarding === 'unseen') {
     showAutoplaySetupPrompt('initial');
@@ -625,7 +708,6 @@ function runFullSweep(): void {
   let visibleRegularCount = 0;
 
   for (const card of cards) {
-    // Skip nested lockup elements whose outer card renderer is already handled
     if (card.parentElement?.closest(VIDEO_CARD_SELECTORS)) {
       continue;
     }
@@ -663,7 +745,7 @@ function attachShortClickInterceptor(): void {
   document.addEventListener(
     'click',
     (event) => {
-      if (snoozedUntilReloadOrPopup) return;
+      if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
       const snapshot = getCurrentSnapshot();
       const shouldForceStandard =
         snapshot.policy.shortsMode === 'redirectToWatch' || snapshot.shortsLockedForSession;
@@ -685,6 +767,7 @@ function attachShortClickInterceptor(): void {
 }
 
 function scheduleDebouncedSweep(): void {
+  if (expiredScreenRendered) return;
   if (mutationDebounceTimer !== null) return;
   mutationDebounceTimer = window.setTimeout(() => {
     mutationDebounceTimer = null;
@@ -720,7 +803,7 @@ async function mountYouTubeFilterHost(): Promise<void> {
   });
 
   sweepTimer = window.setInterval(() => {
-    if (document.hidden) return;
+    if (document.hidden && !expiredScreenRendered) return;
     checkAutoplayOnWatchPage();
     runFullSweep();
   }, SWEEP_INTERVAL_MS);
@@ -741,6 +824,7 @@ async function mountYouTubeFilterHost(): Promise<void> {
 
   window.addEventListener('pagehide', () => {
     if (sweepTimer !== null) window.clearInterval(sweepTimer);
+    if (exactExpiryTimer !== null) window.clearTimeout(exactExpiryTimer);
     mutationObserver?.disconnect();
     shortObserver?.disconnect();
   });

@@ -217,11 +217,13 @@
   var autoplayObserved = "unknown";
   var autoplayGuideActive = false;
   var activeModalId = null;
+  var expiredScreenRendered = false;
   var resolvedShortDurations = /* @__PURE__ */ new Map();
   var pendingShortIds = /* @__PURE__ */ new Set();
   var shortObserver = null;
   var mutationObserver = null;
   var sweepTimer = null;
+  var exactExpiryTimer = null;
   var mutationDebounceTimer = null;
   var lastScrollNudgeMs = 0;
   var consecutiveScrollNudges = 0;
@@ -248,9 +250,11 @@
     return "unknown";
   }
   function pauseActiveVideo() {
-    const video = document.querySelector("video.html5-main-video, video");
-    if (video && !video.paused) {
-      video.pause();
+    const videos = document.querySelectorAll("video");
+    for (const video of videos) {
+      if (!video.paused) {
+        video.pause();
+      }
     }
   }
   function removeModal() {
@@ -288,6 +292,59 @@
     card.appendChild(btnRow);
     root.appendChild(card);
     document.documentElement.appendChild(root);
+  }
+  function renderExpiredTakeover() {
+    pauseActiveVideo();
+    removeModal();
+    mutationObserver?.disconnect();
+    shortObserver?.disconnect();
+    if (window.location.pathname !== "/" || window.location.search || window.location.hash) {
+      try {
+        window.history.replaceState(null, "", "/");
+      } catch {
+      }
+    }
+    document.title = "Time's up \u2014 TimeFit";
+    if (expiredScreenRendered && document.getElementById("yt-timefit-expired-screen")) {
+      return;
+    }
+    expiredScreenRendered = true;
+    const mediaEls = document.querySelectorAll("video, audio");
+    for (const media of mediaEls) {
+      media.pause();
+      media.muted = true;
+      media.removeAttribute("src");
+    }
+    if (document.body) {
+      document.body.replaceChildren();
+      document.body.className = "yt-timefit-expired-body";
+    }
+    const screen = document.createElement("main");
+    screen.id = "yt-timefit-expired-screen";
+    screen.className = "yt-timefit-expired-screen";
+    const card = document.createElement("div");
+    card.className = "yt-timefit-expired-card";
+    const title = document.createElement("h1");
+    title.textContent = "Time's up :)";
+    const message = document.createElement("p");
+    message.textContent = "Your YouTube break has ended. You can start a new session or stop the timer from the TimeFit extension menu whenever you are ready.";
+    card.appendChild(title);
+    card.appendChild(message);
+    screen.appendChild(card);
+    document.body?.appendChild(screen);
+  }
+  function scheduleExactExpiryTrigger(snapshot) {
+    if (exactExpiryTimer !== null) {
+      window.clearTimeout(exactExpiryTimer);
+      exactExpiryTimer = null;
+    }
+    if (snapshot.status === "active" && snapshot.remainingMs !== null && snapshot.remainingMs > 0) {
+      const delay = Math.min(snapshot.remainingMs + 50, 24 * 60 * 6e4);
+      exactExpiryTimer = window.setTimeout(() => {
+        exactExpiryTimer = null;
+        runFullSweep();
+      }, delay);
+    }
   }
   function showAutoplaySetupPrompt(reason) {
     const title = reason === "detected_enabled" ? "Autoplay is still turned on" : "Disable YouTube Autoplay to get started";
@@ -343,7 +400,7 @@
     }, 6e3);
   }
   function checkAutoplayOnWatchPage() {
-    if (snoozedUntilReloadOrPopup) return;
+    if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
     if (!isWatchPage()) {
       autoplayObserved = "unknown";
       return;
@@ -377,6 +434,7 @@
     }
   }
   function syncShortsNavVisibility() {
+    if (expiredScreenRendered) return;
     const shouldHideNav = !snoozedUntilReloadOrPopup && persistedState.policy.hideShortsNavButton;
     for (const selector of SHORTS_NAV_SELECTORS) {
       const matches = document.querySelectorAll(selector);
@@ -649,12 +707,21 @@
     }
   }
   function runFullSweep() {
+    const snapshot = getCurrentSnapshot();
+    if (expiredScreenRendered && snapshot.status !== "expired") {
+      window.location.reload();
+      return;
+    }
+    if (!snoozedUntilReloadOrPopup && snapshot.status === "expired") {
+      renderExpiredTakeover();
+      return;
+    }
+    scheduleExactExpiryTrigger(snapshot);
     syncShortsNavVisibility();
     if (snoozedUntilReloadOrPopup) {
       restoreAllCards();
       return;
     }
-    const snapshot = getCurrentSnapshot();
     if (snapshot.status === "needs_autoplay_setup" && persistedState.autoplayOnboarding === "unseen") {
       showAutoplaySetupPrompt("initial");
       return;
@@ -702,7 +769,7 @@
     document.addEventListener(
       "click",
       (event) => {
-        if (snoozedUntilReloadOrPopup) return;
+        if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
         const snapshot = getCurrentSnapshot();
         const shouldForceStandard = snapshot.policy.shortsMode === "redirectToWatch" || snapshot.shortsLockedForSession;
         if (!shouldForceStandard) return;
@@ -719,6 +786,7 @@
     );
   }
   function scheduleDebouncedSweep() {
+    if (expiredScreenRendered) return;
     if (mutationDebounceTimer !== null) return;
     mutationDebounceTimer = window.setTimeout(() => {
       mutationDebounceTimer = null;
@@ -749,7 +817,7 @@
       subtree: true
     });
     sweepTimer = window.setInterval(() => {
-      if (document.hidden) return;
+      if (document.hidden && !expiredScreenRendered) return;
       checkAutoplayOnWatchPage();
       runFullSweep();
     }, SWEEP_INTERVAL_MS);
@@ -767,6 +835,7 @@
     });
     window.addEventListener("pagehide", () => {
       if (sweepTimer !== null) window.clearInterval(sweepTimer);
+      if (exactExpiryTimer !== null) window.clearTimeout(exactExpiryTimer);
       mutationObserver?.disconnect();
       shortObserver?.disconnect();
     });
