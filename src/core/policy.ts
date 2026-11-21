@@ -3,6 +3,7 @@ import {
   BudgetSpec,
   FilterVerdict,
   PersistedSessionState,
+  PlaybackOverrunAnalysis,
   SessionSnapshot,
   ShortsStage,
   VideoCandidate,
@@ -25,7 +26,6 @@ export function resolveBudgetBounds(
     return { startedAtMs: nowMs, endsAtMs: nowMs + durationMs };
   }
 
-  // mode === 'until'
   const parts = spec.endTime.split(':').map((n) => Number.parseInt(n, 10));
   const hours = parts[0];
   const minutes = parts[1];
@@ -50,15 +50,20 @@ export function resolveBudgetBounds(
   return { startedAtMs: nowMs, endsAtMs: target.getTime() };
 }
 
-/** Computes remaining milliseconds for timed sessions (null for idle or static maxLength). */
+/** Computes remaining milliseconds for timed sessions (frozen when paused). */
 export function computeRemainingMs(
-  state: Pick<PersistedSessionState, 'status' | 'spec' | 'endsAtMs'>,
+  state: Pick<PersistedSessionState, 'status' | 'spec' | 'endsAtMs' | 'pausedRemainingMs'>,
   nowMs: number,
 ): number | null {
-  if (state.status !== 'active' || !state.spec || state.spec.mode === 'maxLength') {
+  if (!state.spec || state.spec.mode === 'maxLength') {
     return null;
   }
-  if (state.endsAtMs === null) return null;
+  if (state.status === 'paused') {
+    return state.pausedRemainingMs !== null ? Math.max(0, state.pausedRemainingMs) : null;
+  }
+  if (state.status !== 'active' || state.endsAtMs === null) {
+    return null;
+  }
   return Math.max(0, state.endsAtMs - nowMs);
 }
 
@@ -67,10 +72,10 @@ export function computeRemainingMs(
  * and still finish before the time limit ends.
  */
 export function computeMaxAllowedSeconds(
-  state: Pick<PersistedSessionState, 'status' | 'spec' | 'endsAtMs' | 'policy'>,
+  state: Pick<PersistedSessionState, 'status' | 'spec' | 'endsAtMs' | 'pausedRemainingMs' | 'policy'>,
   nowMs: number,
 ): number | null {
-  if (state.status !== 'active' || !state.spec) return null;
+  if ((state.status !== 'active' && state.status !== 'paused') || !state.spec) return null;
 
   if (state.spec.mode === 'maxLength') {
     return Math.max(0, Math.round(state.spec.maxMinutes * 60));
@@ -84,17 +89,63 @@ export function computeMaxAllowedSeconds(
 }
 
 /**
- * Computes the graduated Shorts escalation stage for a timed session:
- * - If Shorts toggle is ON (`redirectToWatch`) or already locked this session -> `locked_to_watch`
- * - If within final 5 or 10 minutes before break ends -> `locked_to_watch`
- * - Else if <= 25% of break remaining (75% elapsed) -> `nudge_25`
- * - Else if <= 50% of break remaining (50% elapsed) -> `nudge_50`
- * - Else -> `unrestricted`
+ * Computes whether a playing/resumed/direct-link video will run past the remaining break time,
+ * the exact extra seconds needed to finish it, the exact dynamic playback speed (max 2.0x),
+ * and the progress-bar cutoff percentage for the red early-cutoff indicator.
+ */
+export function computePlaybackOverrun(
+  videoCurrentSeconds: number,
+  videoDurationSeconds: number,
+  playbackRate: number,
+  remainingMs: number,
+): PlaybackOverrunAnalysis {
+  const safeDuration = Math.max(0, videoDurationSeconds);
+  const safeCurrent = Math.min(safeDuration, Math.max(0, videoCurrentSeconds));
+  const safeRate = Math.max(0.25, playbackRate || 1);
+  const videoRemainingSeconds = Math.max(0, safeDuration - safeCurrent);
+  const breakRemainingSeconds = Math.max(0, remainingMs / 1000);
+
+  const effectiveVideoRemaining = videoRemainingSeconds / safeRate;
+  const isOverrunning = safeDuration > 0 && effectiveVideoRemaining > breakRemainingSeconds + 2;
+
+  const extraSecondsNeeded = isOverrunning
+    ? Math.ceil(effectiveVideoRemaining - breakRemainingSeconds)
+    : 0;
+
+  let suggestedSpeed: number | null = null;
+  if (isOverrunning && breakRemainingSeconds > 0) {
+    const rawNeeded = videoRemainingSeconds / breakRemainingSeconds;
+    const roundedUp = Math.ceil(rawNeeded * 100) / 100;
+    if (roundedUp <= 2.0 && roundedUp > safeRate) {
+      suggestedSpeed = roundedUp;
+    }
+  }
+
+  const cutoffVideoSeconds = Math.min(
+    safeDuration,
+    safeCurrent + breakRemainingSeconds * safeRate,
+  );
+  const cutoffPercent =
+    safeDuration > 0 ? Math.min(100, Math.max(0, (cutoffVideoSeconds / safeDuration) * 100)) : 100;
+
+  return {
+    isOverrunning,
+    videoRemainingSeconds,
+    breakRemainingSeconds,
+    extraSecondsNeeded,
+    suggestedSpeed,
+    cutoffVideoSeconds,
+    cutoffPercent,
+  };
+}
+
+/**
+ * Computes the graduated Shorts escalation stage for a timed session.
  */
 export function computeShortsStage(
   state: Pick<
     PersistedSessionState,
-    'status' | 'spec' | 'startedAtMs' | 'endsAtMs' | 'shortsLockedForSession' | 'policy'
+    'status' | 'spec' | 'startedAtMs' | 'endsAtMs' | 'pausedRemainingMs' | 'shortsLockedForSession' | 'policy'
   >,
   nowMs: number,
 ): ShortsStage {
@@ -133,15 +184,14 @@ export function computeShortsStage(
   return 'unrestricted';
 }
 
-/**
- * Evaluates a single video or Short thumbnail against the current session snapshot.
- * Shorts are treated as normal video thumbnails on Home/Search and filtered strictly by duration.
- */
 export function evaluateVideoCandidate(
   candidate: VideoCandidate,
   snapshot: SessionSnapshot,
 ): FilterVerdict {
-  if (snapshot.status !== 'active' || snapshot.maxAllowedVideoSeconds === null) {
+  if (
+    (snapshot.status !== 'active' && snapshot.status !== 'paused') ||
+    snapshot.maxAllowedVideoSeconds === null
+  ) {
     return 'allow';
   }
 
@@ -152,7 +202,6 @@ export function evaluateVideoCandidate(
   }
 
   if (candidate.durationSeconds === null) {
-    // Wait for Shorts duration to resolve rather than hiding them blindly on Home/Search
     if (candidate.kind === 'short') {
       return 'allow';
     }
@@ -166,7 +215,6 @@ export function evaluateVideoCandidate(
   return 'allow';
 }
 
-/** Builds a derived, UI-ready SessionSnapshot from persisted state + tab runtime signals. */
 export function buildSessionSnapshot(
   state: PersistedSessionState,
   nowMs: number,
@@ -211,7 +259,9 @@ export function buildSessionSnapshot(
     endsAtMs: effectiveState.endsAtMs,
     remainingMs: isTimedExpired ? 0 : remainingMs,
     maxAllowedVideoSeconds:
-      derivedStatus === 'active' ? computeMaxAllowedSeconds(effectiveState, nowMs) : null,
+      derivedStatus === 'active' || derivedStatus === 'paused'
+        ? computeMaxAllowedSeconds(effectiveState, nowMs)
+        : null,
     autoplayOnboarding: effectiveState.autoplayOnboarding,
     autoplayObserved,
     shortsStage: computeShortsStage(effectiveState, nowMs),
@@ -221,7 +271,6 @@ export function buildSessionSnapshot(
   };
 }
 
-/** Converts a YouTube Short ID and optional playback position into a standard watch URL. */
 export function buildStandardWatchUrl(videoId: string, currentTimeSeconds?: number): string {
   const base = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
   if (currentTimeSeconds && currentTimeSeconds >= 1) {

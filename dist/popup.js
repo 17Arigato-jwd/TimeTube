@@ -1,9 +1,14 @@
 // src/core/policy.ts
 function computeRemainingMs(state, nowMs) {
-  if (state.status !== "active" || !state.spec || state.spec.mode === "maxLength") {
+  if (!state.spec || state.spec.mode === "maxLength") {
     return null;
   }
-  if (state.endsAtMs === null) return null;
+  if (state.status === "paused") {
+    return state.pausedRemainingMs !== null ? Math.max(0, state.pausedRemainingMs) : null;
+  }
+  if (state.status !== "active" || state.endsAtMs === null) {
+    return null;
+  }
   return Math.max(0, state.endsAtMs - nowMs);
 }
 
@@ -47,9 +52,9 @@ function setModeTab(mode) {
 function renderState(state) {
   currentState = state;
   const remainingMs = computeRemainingMs(state, Date.now());
-  if (state.status === "active") {
-    statusPill.textContent = state.spec?.mode === "maxLength" ? "Max Length" : "Active";
-    statusPill.className = "pill pill-active";
+  if (state.status === "active" || state.status === "paused") {
+    statusPill.textContent = state.status === "paused" ? "Paused" : state.spec?.mode === "maxLength" ? "Max Length" : "Active";
+    statusPill.className = state.status === "paused" ? "pill pill-paused" : "pill pill-active";
     activeBanner.classList.remove("hidden");
     if (state.spec?.mode === "maxLength") {
       remainingDisplay.textContent = `\u2264 ${state.spec.maxMinutes}m`;

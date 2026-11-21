@@ -16,9 +16,9 @@
         return (parts[0] ?? 0) * 3600 + (parts[1] ?? 0) * 60 + (parts[2] ?? 0);
       }
     }
-    const hoursMatch = cleaned.match(/(\d+)\s+hours?(?!\s+ago\b)/i);
-    const minsMatch = cleaned.match(/(\d+)\s+minutes?(?!\s+ago\b)/i);
-    const secsMatch = cleaned.match(/(\d+)\s+seconds?(?!\s+ago\b)/i);
+    const hoursMatch = cleaned.match(/(\d+)\s+hours?\b(?!\s+ago\b)/i);
+    const minsMatch = cleaned.match(/(\d+)\s+minutes?\b(?!\s+ago\b)/i);
+    const secsMatch = cleaned.match(/(\d+)\s+seconds?\b(?!\s+ago\b)/i);
     if (hoursMatch || minsMatch || secsMatch) {
       const h = hoursMatch ? Number.parseInt(hoursMatch[1] ?? "0", 10) : 0;
       const m = minsMatch ? Number.parseInt(minsMatch[1] ?? "0", 10) : 0;
@@ -45,14 +45,19 @@
 
   // src/core/policy.ts
   function computeRemainingMs(state, nowMs) {
-    if (state.status !== "active" || !state.spec || state.spec.mode === "maxLength") {
+    if (!state.spec || state.spec.mode === "maxLength") {
       return null;
     }
-    if (state.endsAtMs === null) return null;
+    if (state.status === "paused") {
+      return state.pausedRemainingMs !== null ? Math.max(0, state.pausedRemainingMs) : null;
+    }
+    if (state.status !== "active" || state.endsAtMs === null) {
+      return null;
+    }
     return Math.max(0, state.endsAtMs - nowMs);
   }
   function computeMaxAllowedSeconds(state, nowMs) {
-    if (state.status !== "active" || !state.spec) return null;
+    if (state.status !== "active" && state.status !== "paused" || !state.spec) return null;
     if (state.spec.mode === "maxLength") {
       return Math.max(0, Math.round(state.spec.maxMinutes * 60));
     }
@@ -60,6 +65,38 @@
     if (remainingMs === null) return null;
     const remainingSec = Math.floor(remainingMs / 1e3);
     return Math.max(0, remainingSec - Math.max(0, state.policy.bufferSeconds));
+  }
+  function computePlaybackOverrun(videoCurrentSeconds, videoDurationSeconds, playbackRate, remainingMs) {
+    const safeDuration = Math.max(0, videoDurationSeconds);
+    const safeCurrent = Math.min(safeDuration, Math.max(0, videoCurrentSeconds));
+    const safeRate = Math.max(0.25, playbackRate || 1);
+    const videoRemainingSeconds = Math.max(0, safeDuration - safeCurrent);
+    const breakRemainingSeconds = Math.max(0, remainingMs / 1e3);
+    const effectiveVideoRemaining = videoRemainingSeconds / safeRate;
+    const isOverrunning = safeDuration > 0 && effectiveVideoRemaining > breakRemainingSeconds + 2;
+    const extraSecondsNeeded = isOverrunning ? Math.ceil(effectiveVideoRemaining - breakRemainingSeconds) : 0;
+    let suggestedSpeed = null;
+    if (isOverrunning && breakRemainingSeconds > 0) {
+      const rawNeeded = videoRemainingSeconds / breakRemainingSeconds;
+      const roundedUp = Math.ceil(rawNeeded * 100) / 100;
+      if (roundedUp <= 2 && roundedUp > safeRate) {
+        suggestedSpeed = roundedUp;
+      }
+    }
+    const cutoffVideoSeconds = Math.min(
+      safeDuration,
+      safeCurrent + breakRemainingSeconds * safeRate
+    );
+    const cutoffPercent = safeDuration > 0 ? Math.min(100, Math.max(0, cutoffVideoSeconds / safeDuration * 100)) : 100;
+    return {
+      isOverrunning,
+      videoRemainingSeconds,
+      breakRemainingSeconds,
+      extraSecondsNeeded,
+      suggestedSpeed,
+      cutoffVideoSeconds,
+      cutoffPercent
+    };
   }
   function computeShortsStage(state, nowMs) {
     if (state.policy.shortsMode === "redirectToWatch") {
@@ -86,7 +123,7 @@
     return "unrestricted";
   }
   function evaluateVideoCandidate(candidate, snapshot) {
-    if (snapshot.status !== "active" || snapshot.maxAllowedVideoSeconds === null) {
+    if (snapshot.status !== "active" && snapshot.status !== "paused" || snapshot.maxAllowedVideoSeconds === null) {
       return "allow";
     }
     const failAction = snapshot.policy.exceedAction;
@@ -129,7 +166,7 @@
       startedAtMs: effectiveState.startedAtMs,
       endsAtMs: effectiveState.endsAtMs,
       remainingMs: isTimedExpired ? 0 : remainingMs,
-      maxAllowedVideoSeconds: derivedStatus === "active" ? computeMaxAllowedSeconds(effectiveState, nowMs) : null,
+      maxAllowedVideoSeconds: derivedStatus === "active" || derivedStatus === "paused" ? computeMaxAllowedSeconds(effectiveState, nowMs) : null,
       autoplayOnboarding: effectiveState.autoplayOnboarding,
       autoplayObserved: autoplayObserved2,
       shortsStage: computeShortsStage(effectiveState, nowMs),
@@ -163,6 +200,8 @@
     spec: null,
     startedAtMs: null,
     endsAtMs: null,
+    pausedAtMs: null,
+    pausedRemainingMs: null,
     autoplayOnboarding: "unseen",
     shortsLockedForSession: false,
     acknowledgedPrompts: {
@@ -218,6 +257,13 @@
   var autoplayGuideActive = false;
   var activeModalId = null;
   var expiredScreenRendered = false;
+  var mediaListenersAttached = false;
+  var ignorePauseUntilMs = 0;
+  var choseKeepTimerGoing = false;
+  var timerPausedByVideo = false;
+  var pausePromptTimer = null;
+  var lastDirectCheckedVideoId = null;
+  var acceptedEarlyCutoffVideoId = null;
   var resolvedShortDurations = /* @__PURE__ */ new Map();
   var pendingShortIds = /* @__PURE__ */ new Set();
   var shortObserver = null;
@@ -239,6 +285,39 @@
   function isShortsPage() {
     return window.location.pathname.startsWith("/shorts/");
   }
+  function getActiveMediaId() {
+    if (isWatchPage()) {
+      return new URLSearchParams(window.location.search).get("v");
+    }
+    if (isShortsPage()) {
+      return extractShortIdFromHref(window.location.pathname);
+    }
+    return null;
+  }
+  function isMainPlayerVideo(el) {
+    if (!(el instanceof HTMLVideoElement)) return false;
+    if (!isWatchPage() && !isShortsPage()) return false;
+    if (!Number.isFinite(el.duration) || el.duration <= 0) return false;
+    if (isWatchPage()) {
+      return Boolean(
+        el.classList.contains("html5-main-video") || el.closest("#movie_player, .html5-video-player, ytd-player")
+      );
+    }
+    return Boolean(
+      el.closest("#shorts-player, ytd-reel-video-renderer, .html5-video-player") || el.classList.contains("html5-main-video")
+    );
+  }
+  function formatHumanDuration(totalSeconds) {
+    const safe = Math.max(1, Math.round(totalSeconds));
+    const mins = Math.floor(safe / 60);
+    const secs = safe % 60;
+    if (mins === 0) return `${secs}s`;
+    if (secs === 0) return `${mins}m`;
+    return `${mins}m ${secs}s`;
+  }
+  function formatSpeed(speed) {
+    return `${Number(speed.toFixed(2))}\xD7`;
+  }
   function readAutoplayToggleState() {
     const toggleBtn = document.querySelector(
       'button[data-tooltip-target-id="ytp-autonav-toggle-button"], .ytp-autonav-toggle-button'
@@ -249,13 +328,20 @@
     if (checked === "false") return "disabled";
     return "unknown";
   }
-  function pauseActiveVideo() {
+  function pauseActiveVideo(byExtension = true) {
+    if (byExtension) {
+      ignorePauseUntilMs = Date.now() + 500;
+    }
     const videos = document.querySelectorAll("video");
     for (const video of videos) {
       if (!video.paused) {
         video.pause();
       }
     }
+  }
+  function resumeVideo(video) {
+    if (!video) return;
+    video.play().catch(() => void 0);
   }
   function removeModal() {
     const existing = document.getElementById("yt-timefit-modal-root");
@@ -293,9 +379,236 @@
     root.appendChild(card);
     document.documentElement.appendChild(root);
   }
+  function clearEarlyCutoffBar() {
+    const existing = document.getElementById("yt-timefit-cutoff-bar");
+    if (existing) existing.remove();
+  }
+  function updateEarlyCutoffBar(video, snapshot) {
+    const currentId = getActiveMediaId();
+    if (!video || !currentId || acceptedEarlyCutoffVideoId !== currentId || snapshot.status !== "active" || snapshot.remainingMs === null || !Number.isFinite(video.duration) || video.duration <= 0) {
+      clearEarlyCutoffBar();
+      return;
+    }
+    const analysis = computePlaybackOverrun(
+      video.currentTime,
+      video.duration,
+      video.playbackRate,
+      snapshot.remainingMs
+    );
+    if (!analysis.isOverrunning) {
+      clearEarlyCutoffBar();
+      return;
+    }
+    const progressBar = document.querySelector(
+      ".ytp-progress-bar, #progress-bar-line, .player-controls-content .progress-bar-line"
+    );
+    if (!progressBar) return;
+    let bar = document.getElementById("yt-timefit-cutoff-bar");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "yt-timefit-cutoff-bar";
+      bar.className = "yt-timefit-cutoff-bar";
+      progressBar.appendChild(bar);
+    }
+    const leftPct = Math.min(99.5, Math.max(0, analysis.cutoffPercent));
+    bar.style.left = `${leftPct}%`;
+    bar.style.width = `${Math.max(0, 100 - leftPct)}%`;
+    bar.title = `Break timer ends at ${formatDurationBadge(analysis.cutoffVideoSeconds)}`;
+  }
+  function evaluateMediaOverrun(video, trigger) {
+    if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
+    const videoId = getActiveMediaId();
+    if (!videoId) return;
+    const snapshot = getCurrentSnapshot();
+    if (snapshot.status !== "active" || snapshot.remainingMs === null) return;
+    if (!Number.isFinite(video.duration) || video.duration <= 0) return;
+    const analysis = computePlaybackOverrun(
+      video.currentTime,
+      video.duration,
+      video.playbackRate,
+      snapshot.remainingMs
+    );
+    if (!analysis.isOverrunning) {
+      if (acceptedEarlyCutoffVideoId === videoId) {
+        acceptedEarlyCutoffVideoId = null;
+        clearEarlyCutoffBar();
+      }
+      return;
+    }
+    if (trigger === "direct_link" && acceptedEarlyCutoffVideoId === videoId) {
+      updateEarlyCutoffBar(video, snapshot);
+      return;
+    }
+    pauseActiveVideo(true);
+    const actions = [
+      {
+        label: `Add +${formatHumanDuration(analysis.extraSecondsNeeded)} to timer`,
+        variant: "primary",
+        onClick: async () => {
+          removeModal();
+          acceptedEarlyCutoffVideoId = null;
+          clearEarlyCutoffBar();
+          persistedState = await webext.runtime.sendMessage({
+            type: "EXTEND_SESSION_SECONDS",
+            additionalSeconds: analysis.extraSecondsNeeded + 5
+          });
+          runFullSweep();
+          resumeVideo(video);
+        }
+      }
+    ];
+    if (analysis.suggestedSpeed !== null) {
+      const targetSpeed = analysis.suggestedSpeed;
+      actions.push({
+        label: `Speed up to ${formatSpeed(targetSpeed)}`,
+        variant: "secondary",
+        onClick: () => {
+          removeModal();
+          acceptedEarlyCutoffVideoId = null;
+          clearEarlyCutoffBar();
+          video.playbackRate = targetSpeed;
+          resumeVideo(video);
+        }
+      });
+    }
+    actions.push({
+      label: "Accept early cutoff",
+      variant: "ghost",
+      onClick: () => {
+        removeModal();
+        acceptedEarlyCutoffVideoId = videoId;
+        updateEarlyCutoffBar(video, getCurrentSnapshot());
+        resumeVideo(video);
+      }
+    });
+    const body = `There is ${formatHumanDuration(analysis.videoRemainingSeconds)} left in this video, but only ${formatHumanDuration(analysis.breakRemainingSeconds)} left on your timer.` + (analysis.suggestedSpeed === null ? " Even at 2\xD7 speed, it will run past your break." : "");
+    showModal(`overrun_${videoId}`, "This video won't finish before time is up", body, actions);
+  }
+  function attachDocumentMediaListeners() {
+    if (mediaListenersAttached) return;
+    mediaListenersAttached = true;
+    document.addEventListener(
+      "pause",
+      (event) => {
+        if (Date.now() < ignorePauseUntilMs) return;
+        if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
+        if (!isMainPlayerVideo(event.target)) return;
+        const video = event.target;
+        if (video.ended || video.seeking) return;
+        if (pausePromptTimer !== null) window.clearTimeout(pausePromptTimer);
+        pausePromptTimer = window.setTimeout(() => {
+          pausePromptTimer = null;
+          if (!video.paused || video.ended || video.seeking) return;
+          if (activeModalId !== null) return;
+          const snapshot = getCurrentSnapshot();
+          if (snapshot.status !== "active" || snapshot.remainingMs === null) {
+            return;
+          }
+          if (snapshot.spec?.mode === "until") {
+            choseKeepTimerGoing = true;
+            return;
+          }
+          if (snapshot.spec?.mode !== "countdown") {
+            return;
+          }
+          const breakText = formatHumanDuration(snapshot.remainingMs / 1e3);
+          const vidRem = Math.max(0, video.duration - video.currentTime);
+          const body = vidRem > 0 ? `You have ${breakText} left on your timer and ${formatHumanDuration(vidRem)} left in this video.` : `You have ${breakText} left on your timer.`;
+          showModal("pause_timer_choice", "Video paused \u2014 pause your timer too?", body, [
+            {
+              label: "Pause timer",
+              variant: "primary",
+              onClick: async () => {
+                removeModal();
+                timerPausedByVideo = true;
+                choseKeepTimerGoing = false;
+                persistedState = await webext.runtime.sendMessage({
+                  type: "PAUSE_TIMER"
+                });
+                runFullSweep();
+              }
+            },
+            {
+              label: "Keep timer going",
+              variant: "secondary",
+              onClick: () => {
+                removeModal();
+                timerPausedByVideo = false;
+                choseKeepTimerGoing = true;
+              }
+            }
+          ]);
+        }, 250);
+      },
+      true
+    );
+    document.addEventListener(
+      "play",
+      async (event) => {
+        if (!isMainPlayerVideo(event.target)) return;
+        const video = event.target;
+        if (pausePromptTimer !== null) {
+          window.clearTimeout(pausePromptTimer);
+          pausePromptTimer = null;
+        }
+        if (activeModalId === "pause_timer_choice") {
+          removeModal();
+        }
+        if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
+        if (timerPausedByVideo || persistedState.status === "paused") {
+          timerPausedByVideo = false;
+          persistedState = await webext.runtime.sendMessage({
+            type: "RESUME_TIMER"
+          });
+          runFullSweep();
+          return;
+        }
+        if (choseKeepTimerGoing) {
+          choseKeepTimerGoing = false;
+          evaluateMediaOverrun(video, "resume");
+          return;
+        }
+        const mediaId = getActiveMediaId();
+        if (mediaId && mediaId !== lastDirectCheckedVideoId) {
+          lastDirectCheckedVideoId = mediaId;
+          evaluateMediaOverrun(video, "direct_link");
+        }
+      },
+      true
+    );
+    document.addEventListener(
+      "loadedmetadata",
+      (event) => {
+        if (!isMainPlayerVideo(event.target)) return;
+        const video = event.target;
+        const mediaId = getActiveMediaId();
+        if (!mediaId || mediaId === lastDirectCheckedVideoId) return;
+        lastDirectCheckedVideoId = mediaId;
+        evaluateMediaOverrun(video, "direct_link");
+      },
+      true
+    );
+    document.addEventListener(
+      "ratechange",
+      (event) => {
+        if (!isMainPlayerVideo(event.target)) return;
+        updateEarlyCutoffBar(event.target, getCurrentSnapshot());
+      },
+      true
+    );
+    document.addEventListener(
+      "seeked",
+      (event) => {
+        if (!isMainPlayerVideo(event.target)) return;
+        updateEarlyCutoffBar(event.target, getCurrentSnapshot());
+      },
+      true
+    );
+  }
   function renderExpiredTakeover() {
-    pauseActiveVideo();
+    pauseActiveVideo(true);
     removeModal();
+    clearEarlyCutoffBar();
     mutationObserver?.disconnect();
     shortObserver?.disconnect();
     if (window.location.pathname !== "/" || window.location.search || window.location.hash) {
@@ -425,10 +738,10 @@
     }
     if (observed === "enabled" && !autoplayGuideActive) {
       if (persistedState.autoplayOnboarding === "claimed_disabled" || persistedState.autoplayOnboarding === "verified_disabled") {
-        pauseActiveVideo();
+        pauseActiveVideo(true);
         showAutoplaySetupPrompt("detected_enabled");
       } else if (persistedState.autoplayOnboarding === "unseen") {
-        pauseActiveVideo();
+        pauseActiveVideo(true);
         showAutoplaySetupPrompt("initial");
       }
     }
@@ -626,7 +939,7 @@
     }
     if (snapshot.status !== "active") return;
     if (snapshot.shortsStage === "locked_to_watch") {
-      pauseActiveVideo();
+      pauseActiveVideo(true);
       webext.runtime.sendMessage({ type: "LOCK_SHORTS_FOR_SESSION" }).catch(() => void 0);
       persistedState = { ...persistedState, shortsLockedForSession: true };
       showModal(
@@ -647,7 +960,7 @@
       return;
     }
     if (snapshot.shortsStage === "nudge_25" && !snapshot.acknowledgedPrompts.nudge_25) {
-      pauseActiveVideo();
+      pauseActiveVideo(true);
       showModal(
         "shorts_nudge_25",
         "Only a quarter of your break is left",
@@ -677,7 +990,7 @@
       return;
     }
     if (snapshot.shortsStage === "nudge_50" && !snapshot.acknowledgedPrompts.nudge_50) {
-      pauseActiveVideo();
+      pauseActiveVideo(true);
       showModal(
         "shorts_nudge_50",
         "Half of your break is gone",
@@ -720,6 +1033,7 @@
     syncShortsNavVisibility();
     if (snoozedUntilReloadOrPopup) {
       restoreAllCards();
+      clearEarlyCutoffBar();
       return;
     }
     if (snapshot.status === "needs_autoplay_setup" && persistedState.autoplayOnboarding === "unseen") {
@@ -727,9 +1041,16 @@
       return;
     }
     evaluateShortsPageEscalation(snapshot);
-    if (snapshot.status !== "active") {
+    if (snapshot.status !== "active" && snapshot.status !== "paused") {
       restoreAllCards();
+      clearEarlyCutoffBar();
       return;
+    }
+    if (isWatchPage() || isShortsPage()) {
+      const video = document.querySelector("video.html5-main-video, video");
+      updateEarlyCutoffBar(video, snapshot);
+    } else {
+      clearEarlyCutoffBar();
     }
     const cards = document.querySelectorAll(VIDEO_CARD_SELECTORS);
     const observer = ensureShortObserver();
@@ -800,10 +1121,12 @@
       persistedState = { ...INITIAL_PERSISTED_STATE };
     }
     attachShortClickInterceptor();
+    attachDocumentMediaListeners();
     checkAutoplayOnWatchPage();
     runFullSweep();
     window.addEventListener("yt-navigate-finish", () => {
       consecutiveScrollNudges = 0;
+      choseKeepTimerGoing = false;
       window.setTimeout(() => {
         checkAutoplayOnWatchPage();
         runFullSweep();
@@ -836,6 +1159,7 @@
     window.addEventListener("pagehide", () => {
       if (sweepTimer !== null) window.clearInterval(sweepTimer);
       if (exactExpiryTimer !== null) window.clearTimeout(exactExpiryTimer);
+      if (pausePromptTimer !== null) window.clearTimeout(pausePromptTimer);
       mutationObserver?.disconnect();
       shortObserver?.disconnect();
     });

@@ -44,9 +44,14 @@ function renderState(state: PersistedSessionState): void {
   currentState = state;
   const remainingMs = computeRemainingMs(state, Date.now());
 
-  if (state.status === 'active') {
-    statusPill.textContent = state.spec?.mode === 'maxLength' ? 'Max Length' : 'Active';
-    statusPill.className = 'pill pill-active';
+  if (state.status === 'active' || state.status === 'paused') {
+    statusPill.textContent =
+      state.status === 'paused'
+        ? 'Paused'
+        : state.spec?.mode === 'maxLength'
+          ? 'Max Length'
+          : 'Active';
+    statusPill.className = state.status === 'paused' ? 'pill pill-paused' : 'pill pill-active';
     activeBanner.classList.remove('hidden');
 
     if (state.spec?.mode === 'maxLength') {
@@ -91,7 +96,6 @@ async function syncPolicy(): Promise<void> {
 }
 
 async function initPopup(): Promise<void> {
-  // Opening the extension from the toolbar menu wakes any tab that clicked "Not now"
   await webext.runtime.sendMessage({ type: 'WAKE_FROM_POPUP' }).catch(() => undefined);
   const state = await webext.runtime.sendMessage<PersistedSessionState>({ type: 'GET_STATE' });
   renderState(state);
@@ -147,7 +151,6 @@ async function initPopup(): Promise<void> {
   hideShortsNavCheckbox.addEventListener('change', syncPolicy);
   showShortDurationsCheckbox.addEventListener('change', syncPolicy);
 
-  // Live countdown display while popup is open
   window.setInterval(() => {
     if (currentState) renderState(currentState);
   }, 1000);

@@ -24,6 +24,7 @@ export type SessionStatus =
   | 'idle'
   | 'needs_autoplay_setup'
   | 'snoozed'
+  | 'paused'
   | 'active'
   | 'expired';
 
@@ -40,10 +41,12 @@ export interface FilterPolicy {
 
 export interface PersistedSessionState {
   id: string | null;
-  status: 'idle' | 'active' | 'expired';
+  status: 'idle' | 'active' | 'paused' | 'expired';
   spec: BudgetSpec | null;
   startedAtMs: number | null;
   endsAtMs: number | null;
+  pausedAtMs: number | null;
+  pausedRemainingMs: number | null;
   autoplayOnboarding: AutoplayOnboardingState;
   shortsLockedForSession: boolean;
   acknowledgedPrompts: {
@@ -70,6 +73,19 @@ export interface SessionSnapshot {
     nudge_25: boolean;
   };
   policy: FilterPolicy;
+}
+
+export interface PlaybackOverrunAnalysis {
+  isOverrunning: boolean;
+  videoRemainingSeconds: number;
+  breakRemainingSeconds: number;
+  extraSecondsNeeded: number;
+  /** Dynamic speed needed (e.g. 1.3, 1.57), capped at 2.0; null if > 2.0x or not needed. */
+  suggestedSpeed: number | null;
+  /** Video timestamp (in seconds) where timer will cut off at current playbackRate. */
+  cutoffVideoSeconds: number;
+  /** Percentage along the video progress bar (0..100) where the red cutoff overlay begins. */
+  cutoffPercent: number;
 }
 
 export interface VideoCandidate {
@@ -101,6 +117,8 @@ export const INITIAL_PERSISTED_STATE: PersistedSessionState = {
   spec: null,
   startedAtMs: null,
   endsAtMs: null,
+  pausedAtMs: null,
+  pausedRemainingMs: null,
   autoplayOnboarding: 'unseen',
   shortsLockedForSession: false,
   acknowledgedPrompts: {
@@ -115,6 +133,9 @@ export type RuntimeMessage =
   | { type: 'GET_STATE' }
   | { type: 'START_SESSION'; spec: BudgetSpec; policyOverrides?: Partial<FilterPolicy> }
   | { type: 'EXTEND_SESSION'; additionalMinutes: number }
+  | { type: 'EXTEND_SESSION_SECONDS'; additionalSeconds: number }
+  | { type: 'PAUSE_TIMER' }
+  | { type: 'RESUME_TIMER' }
   | { type: 'STOP_SESSION' }
   | { type: 'UPDATE_POLICY'; patch: Partial<FilterPolicy> }
   | { type: 'SET_AUTOPLAY_ONBOARDING'; state: AutoplayOnboardingState }

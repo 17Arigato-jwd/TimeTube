@@ -6,6 +6,7 @@ import {
 import {
   buildSessionSnapshot,
   buildStandardWatchUrl,
+  computePlaybackOverrun,
   evaluateVideoCandidate,
 } from '../core/policy';
 import {
@@ -63,6 +64,15 @@ let autoplayGuideActive = false;
 let activeModalId: string | null = null;
 let expiredScreenRendered = false;
 
+// Watch & Shorts player pause / overrun tracking
+let mediaListenersAttached = false;
+let ignorePauseUntilMs = 0;
+let choseKeepTimerGoing = false;
+let timerPausedByVideo = false;
+let pausePromptTimer: number | null = null;
+let lastDirectCheckedVideoId: string | null = null;
+let acceptedEarlyCutoffVideoId: string | null = null;
+
 const resolvedShortDurations = new Map<string, number>();
 const pendingShortIds = new Set<string>();
 let shortObserver: IntersectionObserver | null = null;
@@ -88,6 +98,47 @@ function isShortsPage(): boolean {
   return window.location.pathname.startsWith('/shorts/');
 }
 
+function getActiveMediaId(): string | null {
+  if (isWatchPage()) {
+    return new URLSearchParams(window.location.search).get('v');
+  }
+  if (isShortsPage()) {
+    return extractShortIdFromHref(window.location.pathname);
+  }
+  return null;
+}
+
+function isMainPlayerVideo(el: EventTarget | null): el is HTMLVideoElement {
+  if (!(el instanceof HTMLVideoElement)) return false;
+  if (!isWatchPage() && !isShortsPage()) return false;
+  // Ignore tiny hidden preloader/hover videos that have no loaded duration
+  if (!Number.isFinite(el.duration) || el.duration <= 0) return false;
+  if (isWatchPage()) {
+    return Boolean(
+      el.classList.contains('html5-main-video') ||
+        el.closest('#movie_player, .html5-video-player, ytd-player'),
+    );
+  }
+  // Shorts player
+  return Boolean(
+    el.closest('#shorts-player, ytd-reel-video-renderer, .html5-video-player') ||
+      el.classList.contains('html5-main-video'),
+  );
+}
+
+function formatHumanDuration(totalSeconds: number): string {
+  const safe = Math.max(1, Math.round(totalSeconds));
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  if (mins === 0) return `${secs}s`;
+  if (secs === 0) return `${mins}m`;
+  return `${mins}m ${secs}s`;
+}
+
+function formatSpeed(speed: number): string {
+  return `${Number(speed.toFixed(2))}×`;
+}
+
 function readAutoplayToggleState(): AutoplayObservedState {
   const toggleBtn = document.querySelector<HTMLElement>(
     'button[data-tooltip-target-id="ytp-autonav-toggle-button"], .ytp-autonav-toggle-button',
@@ -103,13 +154,21 @@ function readAutoplayToggleState(): AutoplayObservedState {
   return 'unknown';
 }
 
-function pauseActiveVideo(): void {
+function pauseActiveVideo(byExtension = true): void {
+  if (byExtension) {
+    ignorePauseUntilMs = Date.now() + 500;
+  }
   const videos = document.querySelectorAll<HTMLVideoElement>('video');
   for (const video of videos) {
     if (!video.paused) {
       video.pause();
     }
   }
+}
+
+function resumeVideo(video: HTMLVideoElement | null): void {
+  if (!video) return;
+  video.play().catch(() => undefined);
 }
 
 function removeModal(): void {
@@ -162,19 +221,296 @@ function showModal(
   document.documentElement.appendChild(root);
 }
 
-/**
- * Deletes all YouTube page elements, resets the URL to youtube.com, and displays
- * a clean full-screen "Time is up" message.
- */
-function renderExpiredTakeover(): void {
-  pauseActiveVideo();
-  removeModal();
+function clearEarlyCutoffBar(): void {
+  const existing = document.getElementById('yt-timefit-cutoff-bar');
+  if (existing) existing.remove();
+}
 
-  // Disconnect observers so YouTube scripts can't re-trigger sweeps
+function updateEarlyCutoffBar(video: HTMLVideoElement | null, snapshot: SessionSnapshot): void {
+  const currentId = getActiveMediaId();
+  if (
+    !video ||
+    !currentId ||
+    acceptedEarlyCutoffVideoId !== currentId ||
+    snapshot.status !== 'active' ||
+    snapshot.remainingMs === null ||
+    !Number.isFinite(video.duration) ||
+    video.duration <= 0
+  ) {
+    clearEarlyCutoffBar();
+    return;
+  }
+
+  const analysis = computePlaybackOverrun(
+    video.currentTime,
+    video.duration,
+    video.playbackRate,
+    snapshot.remainingMs,
+  );
+
+  if (!analysis.isOverrunning) {
+    clearEarlyCutoffBar();
+    return;
+  }
+
+  const progressBar = document.querySelector<HTMLElement>(
+    '.ytp-progress-bar, #progress-bar-line, .player-controls-content .progress-bar-line',
+  );
+  if (!progressBar) return;
+
+  let bar = document.getElementById('yt-timefit-cutoff-bar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'yt-timefit-cutoff-bar';
+    bar.className = 'yt-timefit-cutoff-bar';
+    progressBar.appendChild(bar);
+  }
+
+  const leftPct = Math.min(99.5, Math.max(0, analysis.cutoffPercent));
+  bar.style.left = `${leftPct}%`;
+  bar.style.width = `${Math.max(0, 100 - leftPct)}%`;
+  bar.title = `Break timer ends at ${formatDurationBadge(analysis.cutoffVideoSeconds)}`;
+}
+
+function evaluateMediaOverrun(video: HTMLVideoElement, trigger: 'resume' | 'direct_link'): void {
+  if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
+  const videoId = getActiveMediaId();
+  if (!videoId) return;
+
+  const snapshot = getCurrentSnapshot();
+  if (snapshot.status !== 'active' || snapshot.remainingMs === null) return;
+  if (!Number.isFinite(video.duration) || video.duration <= 0) return;
+
+  const analysis = computePlaybackOverrun(
+    video.currentTime,
+    video.duration,
+    video.playbackRate,
+    snapshot.remainingMs,
+  );
+
+  if (!analysis.isOverrunning) {
+    if (acceptedEarlyCutoffVideoId === videoId) {
+      acceptedEarlyCutoffVideoId = null;
+      clearEarlyCutoffBar();
+    }
+    return;
+  }
+
+  if (trigger === 'direct_link' && acceptedEarlyCutoffVideoId === videoId) {
+    updateEarlyCutoffBar(video, snapshot);
+    return;
+  }
+
+  pauseActiveVideo(true);
+
+  const actions: Array<{ label: string; variant: 'primary' | 'secondary' | 'ghost'; onClick: () => void }> = [
+    {
+      label: `Add +${formatHumanDuration(analysis.extraSecondsNeeded)} to timer`,
+      variant: 'primary',
+      onClick: async () => {
+        removeModal();
+        acceptedEarlyCutoffVideoId = null;
+        clearEarlyCutoffBar();
+        persistedState = await webext.runtime.sendMessage<PersistedSessionState>({
+          type: 'EXTEND_SESSION_SECONDS',
+          additionalSeconds: analysis.extraSecondsNeeded + 5,
+        });
+        runFullSweep();
+        resumeVideo(video);
+      },
+    },
+  ];
+
+  if (analysis.suggestedSpeed !== null) {
+    const targetSpeed = analysis.suggestedSpeed;
+    actions.push({
+      label: `Speed up to ${formatSpeed(targetSpeed)}`,
+      variant: 'secondary',
+      onClick: () => {
+        removeModal();
+        acceptedEarlyCutoffVideoId = null;
+        clearEarlyCutoffBar();
+        video.playbackRate = targetSpeed;
+        resumeVideo(video);
+      },
+    });
+  }
+
+  actions.push({
+    label: 'Accept early cutoff',
+    variant: 'ghost',
+    onClick: () => {
+      removeModal();
+      acceptedEarlyCutoffVideoId = videoId;
+      updateEarlyCutoffBar(video, getCurrentSnapshot());
+      resumeVideo(video);
+    },
+  });
+
+  const body =
+    `There is ${formatHumanDuration(analysis.videoRemainingSeconds)} left in this video, ` +
+    `but only ${formatHumanDuration(analysis.breakRemainingSeconds)} left on your timer.` +
+    (analysis.suggestedSpeed === null ? ' Even at 2× speed, it will run past your break.' : '');
+
+  showModal(`overrun_${videoId}`, "This video won't finish before time is up", body, actions);
+}
+
+/**
+ * Uses document-level capture-phase listeners so pause/play work reliably on EVERY
+ * Watch video and Short, even when YouTube swaps or recycles <video> elements.
+ */
+function attachDocumentMediaListeners(): void {
+  if (mediaListenersAttached) return;
+  mediaListenersAttached = true;
+
+  document.addEventListener(
+    'pause',
+    (event) => {
+      if (Date.now() < ignorePauseUntilMs) return;
+      if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
+      if (!isMainPlayerVideo(event.target)) return;
+
+      const video = event.target;
+      if (video.ended || video.seeking) return;
+
+      if (pausePromptTimer !== null) window.clearTimeout(pausePromptTimer);
+      pausePromptTimer = window.setTimeout(() => {
+        pausePromptTimer = null;
+        if (!video.paused || video.ended || video.seeking) return;
+        if (activeModalId !== null) return;
+
+        const snapshot = getCurrentSnapshot();
+        if (snapshot.status !== 'active' || snapshot.remainingMs === null) {
+          return;
+        }
+
+        // For hard clock deadlines ("until"), timer keeps running; check overrun on resume
+        if (snapshot.spec?.mode === 'until') {
+          choseKeepTimerGoing = true;
+          return;
+        }
+
+        // For countdown timers, prompt user to either pause the timer or keep it going
+        if (snapshot.spec?.mode !== 'countdown') {
+          return;
+        }
+
+        const breakText = formatHumanDuration(snapshot.remainingMs / 1000);
+        const vidRem = Math.max(0, video.duration - video.currentTime);
+        const body =
+          vidRem > 0
+            ? `You have ${breakText} left on your timer and ${formatHumanDuration(vidRem)} left in this video.`
+            : `You have ${breakText} left on your timer.`;
+
+        showModal('pause_timer_choice', 'Video paused — pause your timer too?', body, [
+          {
+            label: 'Pause timer',
+            variant: 'primary',
+            onClick: async () => {
+              removeModal();
+              timerPausedByVideo = true;
+              choseKeepTimerGoing = false;
+              persistedState = await webext.runtime.sendMessage<PersistedSessionState>({
+                type: 'PAUSE_TIMER',
+              });
+              runFullSweep();
+            },
+          },
+          {
+            label: 'Keep timer going',
+            variant: 'secondary',
+            onClick: () => {
+              removeModal();
+              timerPausedByVideo = false;
+              choseKeepTimerGoing = true;
+            },
+          },
+        ]);
+      }, 250);
+    },
+    true,
+  );
+
+  document.addEventListener(
+    'play',
+    async (event) => {
+      if (!isMainPlayerVideo(event.target)) return;
+      const video = event.target;
+
+      if (pausePromptTimer !== null) {
+        window.clearTimeout(pausePromptTimer);
+        pausePromptTimer = null;
+      }
+      if (activeModalId === 'pause_timer_choice') {
+        removeModal();
+      }
+
+      if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
+
+      if (timerPausedByVideo || persistedState.status === 'paused') {
+        timerPausedByVideo = false;
+        persistedState = await webext.runtime.sendMessage<PersistedSessionState>({
+          type: 'RESUME_TIMER',
+        });
+        runFullSweep();
+        return;
+      }
+
+      if (choseKeepTimerGoing) {
+        choseKeepTimerGoing = false;
+        evaluateMediaOverrun(video, 'resume');
+        return;
+      }
+
+      const mediaId = getActiveMediaId();
+      if (mediaId && mediaId !== lastDirectCheckedVideoId) {
+        lastDirectCheckedVideoId = mediaId;
+        evaluateMediaOverrun(video, 'direct_link');
+      }
+    },
+    true,
+  );
+
+  document.addEventListener(
+    'loadedmetadata',
+    (event) => {
+      if (!isMainPlayerVideo(event.target)) return;
+      const video = event.target;
+      const mediaId = getActiveMediaId();
+      if (!mediaId || mediaId === lastDirectCheckedVideoId) return;
+      lastDirectCheckedVideoId = mediaId;
+      evaluateMediaOverrun(video, 'direct_link');
+    },
+    true,
+  );
+
+  document.addEventListener(
+    'ratechange',
+    (event) => {
+      if (!isMainPlayerVideo(event.target)) return;
+      updateEarlyCutoffBar(event.target, getCurrentSnapshot());
+    },
+    true,
+  );
+
+  document.addEventListener(
+    'seeked',
+    (event) => {
+      if (!isMainPlayerVideo(event.target)) return;
+      updateEarlyCutoffBar(event.target, getCurrentSnapshot());
+    },
+    true,
+  );
+}
+
+function renderExpiredTakeover(): void {
+  pauseActiveVideo(true);
+  removeModal();
+  clearEarlyCutoffBar();
+
   mutationObserver?.disconnect();
   shortObserver?.disconnect();
 
-  // Reset URL to youtube.com root without a flash reload
   if (window.location.pathname !== '/' || window.location.search || window.location.hash) {
     try {
       window.history.replaceState(null, '', '/');
@@ -189,7 +525,6 @@ function renderExpiredTakeover(): void {
   }
   expiredScreenRendered = true;
 
-  // Stop any media/audio before clearing the DOM
   const mediaEls = document.querySelectorAll<HTMLMediaElement>('video, audio');
   for (const media of mediaEls) {
     media.pause();
@@ -197,7 +532,6 @@ function renderExpiredTakeover(): void {
     media.removeAttribute('src');
   }
 
-  // Delete all existing elements on the page
   if (document.body) {
     document.body.replaceChildren();
     document.body.className = 'yt-timefit-expired-body';
@@ -214,7 +548,8 @@ function renderExpiredTakeover(): void {
   title.textContent = "Time's up :)";
 
   const message = document.createElement('p');
-  message.textContent = 'Your YouTube break has ended. You can start a new session or stop the timer from the TimeFit extension menu whenever you are ready.';
+  message.textContent =
+    'Your YouTube break has ended. You can start a new session or stop the timer from the TimeFit extension menu whenever you are ready.';
 
   card.appendChild(title);
   card.appendChild(message);
@@ -228,7 +563,6 @@ function scheduleExactExpiryTrigger(snapshot: SessionSnapshot): void {
     exactExpiryTimer = null;
   }
   if (snapshot.status === 'active' && snapshot.remainingMs !== null && snapshot.remainingMs > 0) {
-    // Cap timeout delay to 24h to stay well within 32-bit timer limits
     const delay = Math.min(snapshot.remainingMs + 50, 24 * 60 * 60_000);
     exactExpiryTimer = window.setTimeout(() => {
       exactExpiryTimer = null;
@@ -335,10 +669,10 @@ function checkAutoplayOnWatchPage(): void {
       persistedState.autoplayOnboarding === 'claimed_disabled' ||
       persistedState.autoplayOnboarding === 'verified_disabled'
     ) {
-      pauseActiveVideo();
+      pauseActiveVideo(true);
       showAutoplaySetupPrompt('detected_enabled');
     } else if (persistedState.autoplayOnboarding === 'unseen') {
-      pauseActiveVideo();
+      pauseActiveVideo(true);
       showAutoplaySetupPrompt('initial');
     }
   }
@@ -584,7 +918,7 @@ function evaluateShortsPageEscalation(snapshot: SessionSnapshot): void {
   if (snapshot.status !== 'active') return;
 
   if (snapshot.shortsStage === 'locked_to_watch') {
-    pauseActiveVideo();
+    pauseActiveVideo(true);
     webext.runtime.sendMessage({ type: 'LOCK_SHORTS_FOR_SESSION' }).catch(() => undefined);
     persistedState = { ...persistedState, shortsLockedForSession: true };
     showModal(
@@ -606,7 +940,7 @@ function evaluateShortsPageEscalation(snapshot: SessionSnapshot): void {
   }
 
   if (snapshot.shortsStage === 'nudge_25' && !snapshot.acknowledgedPrompts.nudge_25) {
-    pauseActiveVideo();
+    pauseActiveVideo(true);
     showModal(
       'shorts_nudge_25',
       'Only a quarter of your break is left',
@@ -637,7 +971,7 @@ function evaluateShortsPageEscalation(snapshot: SessionSnapshot): void {
   }
 
   if (snapshot.shortsStage === 'nudge_50' && !snapshot.acknowledgedPrompts.nudge_50) {
-    pauseActiveVideo();
+    pauseActiveVideo(true);
     showModal(
       'shorts_nudge_50',
       'Half of your break is gone',
@@ -670,13 +1004,11 @@ function evaluateShortsPageEscalation(snapshot: SessionSnapshot): void {
 function runFullSweep(): void {
   const snapshot = getCurrentSnapshot();
 
-  // If the user extended or stopped the session after the expired takeover, reload YouTube cleanly
   if (expiredScreenRendered && snapshot.status !== 'expired') {
     window.location.reload();
     return;
   }
 
-  // As soon as the timer ends, wipe the screen, set URL to youtube.com, and show "Time's up :)"
   if (!snoozedUntilReloadOrPopup && snapshot.status === 'expired') {
     renderExpiredTakeover();
     return;
@@ -687,6 +1019,7 @@ function runFullSweep(): void {
 
   if (snoozedUntilReloadOrPopup) {
     restoreAllCards();
+    clearEarlyCutoffBar();
     return;
   }
 
@@ -697,9 +1030,17 @@ function runFullSweep(): void {
 
   evaluateShortsPageEscalation(snapshot);
 
-  if (snapshot.status !== 'active') {
+  if (snapshot.status !== 'active' && snapshot.status !== 'paused') {
     restoreAllCards();
+    clearEarlyCutoffBar();
     return;
+  }
+
+  if (isWatchPage() || isShortsPage()) {
+    const video = document.querySelector<HTMLVideoElement>('video.html5-main-video, video');
+    updateEarlyCutoffBar(video, snapshot);
+  } else {
+    clearEarlyCutoffBar();
   }
 
   const cards = document.querySelectorAll<HTMLElement>(VIDEO_CARD_SELECTORS);
@@ -783,11 +1124,13 @@ async function mountYouTubeFilterHost(): Promise<void> {
   }
 
   attachShortClickInterceptor();
+  attachDocumentMediaListeners();
   checkAutoplayOnWatchPage();
   runFullSweep();
 
   window.addEventListener('yt-navigate-finish', () => {
     consecutiveScrollNudges = 0;
+    choseKeepTimerGoing = false;
     window.setTimeout(() => {
       checkAutoplayOnWatchPage();
       runFullSweep();
@@ -825,6 +1168,7 @@ async function mountYouTubeFilterHost(): Promise<void> {
   window.addEventListener('pagehide', () => {
     if (sweepTimer !== null) window.clearInterval(sweepTimer);
     if (exactExpiryTimer !== null) window.clearTimeout(exactExpiryTimer);
+    if (pausePromptTimer !== null) window.clearTimeout(pausePromptTimer);
     mutationObserver?.disconnect();
     shortObserver?.disconnect();
   });

@@ -22,9 +22,9 @@ export function parseDurationText(raw: string | null | undefined): number | null
   }
 
   // Spoken ARIA label fallback: e.g., "1 hour, 5 minutes, 20 seconds" (excluding "2 hours ago")
-  const hoursMatch = cleaned.match(/(\d+)\s+hours?(?!\s+ago\b)/i);
-  const minsMatch = cleaned.match(/(\d+)\s+minutes?(?!\s+ago\b)/i);
-  const secsMatch = cleaned.match(/(\d+)\s+seconds?(?!\s+ago\b)/i);
+  const hoursMatch = cleaned.match(/(\d+)\s+hours?\b(?!\s+ago\b)/i);
+  const minsMatch = cleaned.match(/(\d+)\s+minutes?\b(?!\s+ago\b)/i);
+  const secsMatch = cleaned.match(/(\d+)\s+seconds?\b(?!\s+ago\b)/i);
 
   if (hoursMatch || minsMatch || secsMatch) {
     const h = hoursMatch ? Number.parseInt(hoursMatch[1] ?? '0', 10) : 0;

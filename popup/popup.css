@@ -48,6 +48,11 @@ body {
   color: #2dd4bf;
 }
 
+.pill-paused {
+  background: rgba(217, 119, 6, 0.22);
+  color: #fbbf24;
+}
+
 .pill-expired {
   background: rgba(220, 38, 38, 0.2);
   color: #f87171;

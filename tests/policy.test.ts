@@ -10,6 +10,7 @@ import {
   buildSessionSnapshot,
   buildStandardWatchUrl,
   computeMaxAllowedSeconds,
+  computePlaybackOverrun,
   computeShortsStage,
   evaluateVideoCandidate,
   resolveBudgetBounds,
@@ -36,15 +37,16 @@ function makeActiveSession(overrides: Partial<PersistedSessionState> = {}): Pers
   };
 }
 
-test('parseDurationText handles MM:SS, HH:MM:SS, ARIA labels, and rejects LIVE', () => {
+test('parseDurationText handles MM:SS, HH:MM:SS, ARIA labels, and ignores LIVE / New / relative ago', () => {
   assert.equal(parseDurationText('0:45'), 45);
   assert.equal(parseDurationText('12:30'), 750);
   assert.equal(parseDurationText('1:05:20'), 3920);
-  assert.equal(parseDurationText('12 minutes, 30 seconds'), 750);
+  assert.equal(parseDurationText('Video Title by Creator 12 minutes, 30 seconds 2 hours ago'), 750);
   assert.equal(parseDurationText('45 seconds'), 45);
+  assert.equal(parseDurationText('2 hours ago'), null);
+  assert.equal(parseDurationText('New'), null);
   assert.equal(parseDurationText('LIVE'), null);
   assert.equal(parseDurationText('SHORTS'), null);
-  assert.equal(parseDurationText(''), null);
 });
 
 test('formatDurationBadge & HTML duration extraction work accurately', () => {
@@ -57,7 +59,7 @@ test('formatDurationBadge & HTML duration extraction work accurately', () => {
 });
 
 test('resolveBudgetBounds handles countdown and next-day until rollover', () => {
-  const now = new Date(2026, 10, 21, 18, 0, 0, 0).getTime(); // 18:00 local
+  const now = new Date(2026, 10, 21, 18, 0, 0, 0).getTime();
   const sameDay = resolveBudgetBounds({ mode: 'until', endTime: '19:30' }, now);
   assert.equal((sameDay.endsAtMs! - now) / 60_000, 90);
 
@@ -67,14 +69,13 @@ test('resolveBudgetBounds handles countdown and next-day until rollover', () => 
 
 test('dynamic sidebar pruning shrinks maxAllowedVideoSeconds as time elapses', () => {
   const session = makeActiveSession({ policy: { ...DEFAULT_POLICY, bufferSeconds: 15 } });
-  const t1 = Date.parse('2026-11-21T16:30:00Z'); // 10 min left
+  const t1 = Date.parse('2026-11-21T16:30:00Z');
   assert.equal(computeMaxAllowedSeconds(session, t1), 585);
 
   const snap1 = buildSessionSnapshot(session, t1, { autoplayObserved: 'disabled' });
   assert.equal(evaluateVideoCandidate({ id: 'v1', kind: 'video', durationSeconds: 580 }, snap1), 'allow');
   assert.equal(evaluateVideoCandidate({ id: 'v2', kind: 'video', durationSeconds: 600 }, snap1), 'hide');
 
-  // 2 minutes later (8 min left = 480s - 15s = 465s): v1 (580s) now gets hidden
   const t2 = Date.parse('2026-11-21T16:32:00Z');
   const snap2 = buildSessionSnapshot(session, t2, { autoplayObserved: 'disabled' });
   assert.equal(evaluateVideoCandidate({ id: 'v1', kind: 'video', durationSeconds: 580 }, snap2), 'hide');
@@ -82,14 +83,11 @@ test('dynamic sidebar pruning shrinks maxAllowedVideoSeconds as time elapses', (
 
 test('Shorts thumbnails on Home/Search are filtered by duration, not blanket-blocked', () => {
   const session = makeActiveSession();
-  const twoMinsLeft = Date.parse('2026-11-21T16:38:00Z'); // 120s left
+  const twoMinsLeft = Date.parse('2026-11-21T16:38:00Z');
   const snap = buildSessionSnapshot(session, twoMinsLeft, { autoplayObserved: 'disabled' });
 
-  // Unresolved Short duration stays visible while background fetch resolves
   assert.equal(evaluateVideoCandidate({ id: 's0', kind: 'short', durationSeconds: null }, snap), 'allow');
-  // 45s Short fits in 2 min remaining
   assert.equal(evaluateVideoCandidate({ id: 's1', kind: 'short', durationSeconds: 45 }, snap), 'allow');
-  // 2m45s (165s) Short exceeds 2 min remaining -> hidden
   assert.equal(evaluateVideoCandidate({ id: 's2', kind: 'short', durationSeconds: 165 }, snap), 'hide');
 });
 
@@ -98,16 +96,11 @@ test('graduated Shorts escalation fires at 50% -> 25% -> final 5/10 min cutoff',
     policy: { ...DEFAULT_POLICY, shortsMode: 'escalatingNudge', shortsLockCutoffMinutes: 5 },
   });
 
-  // 40m session: 30m left (25% elapsed) -> unrestricted
   assert.equal(computeShortsStage(session, Date.parse('2026-11-21T16:10:00Z')), 'unrestricted');
-  // 20m left (50% elapsed) -> nudge_50
   assert.equal(computeShortsStage(session, Date.parse('2026-11-21T16:20:00Z')), 'nudge_50');
-  // 10m left (25% remaining) -> nudge_25
   assert.equal(computeShortsStage(session, Date.parse('2026-11-21T16:30:00Z')), 'nudge_25');
-  // 5m left (cutoff) -> locked_to_watch
   assert.equal(computeShortsStage(session, Date.parse('2026-11-21T16:35:00Z')), 'locked_to_watch');
 
-  // Toggle ON always locks immediately to standard player
   const disabledShorts = makeActiveSession({
     policy: { ...DEFAULT_POLICY, shortsMode: 'redirectToWatch' },
   });
@@ -118,15 +111,44 @@ test('Autoplay onboarding, claim verification, and Not Now snooze states work pr
   const unseen = makeActiveSession({ autoplayOnboarding: 'unseen' });
   const now = Date.parse('2026-11-21T16:10:00Z');
 
-  // Initial setup requires Autoplay onboarding
   assert.equal(buildSessionSnapshot(unseen, now).status, 'needs_autoplay_setup');
-
-  // Clicking "Not now" snoozes until reload or popup wake
   assert.equal(buildSessionSnapshot(unseen, now, { snoozed: true }).status, 'snoozed');
 
-  // Clicking "I've already done it" allows active browsing until Watch player proves Autoplay is still ON
   const claimed = makeActiveSession({ autoplayOnboarding: 'claimed_disabled' });
   assert.equal(buildSessionSnapshot(claimed, now, { autoplayObserved: 'unknown' }).status, 'active');
   assert.equal(buildSessionSnapshot(claimed, now, { autoplayObserved: 'enabled' }).status, 'needs_autoplay_setup');
   assert.equal(buildSessionSnapshot(claimed, now, { autoplayObserved: 'disabled' }).status, 'active');
+});
+
+test('computePlaybackOverrun calculates exact dynamic speeds (<=2x), extra seconds, and red cutoff %', () => {
+  // Plenty of time left: 10 min video (600s) at 0s with 30 min (1800s) left -> no overrun
+  const plenty = computePlaybackOverrun(0, 600, 1, 30 * 60_000);
+  assert.equal(plenty.isOverrunning, false);
+  assert.equal(plenty.suggestedSpeed, null);
+
+  // 1000s total, at 215s (785s left), 500s left on timer -> 785 / 500 = 1.57x!
+  const mid = computePlaybackOverrun(215, 1000, 1, 500_000);
+  assert.equal(mid.isOverrunning, true);
+  assert.equal(mid.extraSecondsNeeded, 285);
+  assert.equal(mid.suggestedSpeed, 1.57);
+  assert.equal(mid.cutoffVideoSeconds, 715);
+  assert.equal(mid.cutoffPercent, 71.5);
+
+  // Needs > 2.0x (1500s left, 500s timer -> 3.0x): suggestedSpeed is null
+  const tooLong = computePlaybackOverrun(0, 1500, 1, 500_000);
+  assert.equal(tooLong.isOverrunning, true);
+  assert.equal(tooLong.suggestedSpeed, null);
+  assert.equal(tooLong.extraSecondsNeeded, 1000);
+});
+
+test('paused countdown freezes remainingMs cleanly', () => {
+  const paused = makeActiveSession({
+    status: 'paused',
+    pausedAtMs: Date.parse('2026-11-21T16:10:00Z'),
+    pausedRemainingMs: 18 * 60_000,
+  });
+  const later = Date.parse('2026-11-21T16:55:00Z');
+  const snap = buildSessionSnapshot(paused, later, { autoplayObserved: 'disabled' });
+  assert.equal(snap.status, 'paused');
+  assert.equal(snap.remainingMs, 18 * 60_000);
 });

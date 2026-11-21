@@ -56,6 +56,11 @@ async function syncAlarmsAndBadge(state: PersistedSessionState): Promise<void> {
   const nowMs = Date.now();
   const remainingMs = computeRemainingMs(state, nowMs);
 
+  if (state.status === 'paused') {
+    await setBadge('II', '#d97706');
+    return;
+  }
+
   if (state.status === 'active' && state.spec) {
     if (state.spec.mode === 'maxLength') {
       await setBadge(`${state.spec.maxMinutes}m`, '#2563eb');
@@ -114,7 +119,6 @@ async function resolveShortDuration(videoId: string): Promise<number | null> {
       const html = await resp.text();
       const seconds = extractLengthSecondsFromHtml(html);
       if (seconds !== null) {
-        // Keep cache bounded to 400 recent entries
         const keys = Object.keys(cache);
         if (keys.length > 400) {
           keys
@@ -181,6 +185,8 @@ async function handleMessage(msg: RuntimeMessage): Promise<unknown> {
         spec: msg.spec,
         startedAtMs: bounds.startedAtMs,
         endsAtMs: bounds.endsAtMs,
+        pausedAtMs: null,
+        pausedRemainingMs: null,
         shortsLockedForSession: false,
         acknowledgedPrompts: { nudge_50: false, nudge_25: false },
         policy: { ...state.policy, ...(msg.policyOverrides ?? {}) },
@@ -191,14 +197,84 @@ async function handleMessage(msg: RuntimeMessage): Promise<unknown> {
     }
 
     case 'EXTEND_SESSION': {
-      if (state.status !== 'active' && state.status !== 'expired') return state;
+      if (state.status !== 'active' && state.status !== 'paused' && state.status !== 'expired') {
+        return state;
+      }
       if (!state.spec || state.spec.mode === 'maxLength') return state;
+      const deltaMs = Math.max(1, msg.additionalMinutes) * 60_000;
+      if (state.status === 'paused') {
+        const next: PersistedSessionState = {
+          ...state,
+          pausedRemainingMs: (state.pausedRemainingMs ?? 0) + deltaMs,
+        };
+        await saveState(next);
+        return next;
+      }
       const baseEnd = Math.max(nowMs, state.endsAtMs ?? nowMs);
-      const nextEnd = baseEnd + Math.max(1, msg.additionalMinutes) * 60_000;
       const next: PersistedSessionState = {
         ...state,
         status: 'active',
-        endsAtMs: nextEnd,
+        endsAtMs: baseEnd + deltaMs,
+        pausedAtMs: null,
+        pausedRemainingMs: null,
+      };
+      await saveState(next);
+      return next;
+    }
+
+    case 'EXTEND_SESSION_SECONDS': {
+      if (state.status !== 'active' && state.status !== 'paused' && state.status !== 'expired') {
+        return state;
+      }
+      if (!state.spec || state.spec.mode === 'maxLength') return state;
+      const deltaMs = Math.max(1, Math.ceil(msg.additionalSeconds)) * 1000;
+      if (state.status === 'paused') {
+        const next: PersistedSessionState = {
+          ...state,
+          pausedRemainingMs: (state.pausedRemainingMs ?? 0) + deltaMs,
+        };
+        await saveState(next);
+        return next;
+      }
+      const baseEnd = Math.max(nowMs, state.endsAtMs ?? nowMs);
+      const next: PersistedSessionState = {
+        ...state,
+        status: 'active',
+        endsAtMs: baseEnd + deltaMs,
+        pausedAtMs: null,
+        pausedRemainingMs: null,
+      };
+      await saveState(next);
+      return next;
+    }
+
+    case 'PAUSE_TIMER': {
+      if (state.status !== 'active' || state.spec?.mode !== 'countdown' || state.endsAtMs === null) {
+        return state;
+      }
+      const remaining = Math.max(0, state.endsAtMs - nowMs);
+      const next: PersistedSessionState = {
+        ...state,
+        status: 'paused',
+        pausedAtMs: nowMs,
+        pausedRemainingMs: remaining,
+      };
+      await saveState(next);
+      return next;
+    }
+
+    case 'RESUME_TIMER': {
+      if (state.status !== 'paused' || state.pausedRemainingMs === null) {
+        return state;
+      }
+      const pausedDurationMs = state.pausedAtMs !== null ? Math.max(0, nowMs - state.pausedAtMs) : 0;
+      const next: PersistedSessionState = {
+        ...state,
+        status: 'active',
+        startedAtMs: state.startedAtMs !== null ? state.startedAtMs + pausedDurationMs : nowMs,
+        endsAtMs: nowMs + state.pausedRemainingMs,
+        pausedAtMs: null,
+        pausedRemainingMs: null,
       };
       await saveState(next);
       return next;
@@ -212,6 +288,8 @@ async function handleMessage(msg: RuntimeMessage): Promise<unknown> {
         spec: null,
         startedAtMs: null,
         endsAtMs: null,
+        pausedAtMs: null,
+        pausedRemainingMs: null,
         shortsLockedForSession: false,
         acknowledgedPrompts: { nudge_50: false, nudge_25: false },
       };

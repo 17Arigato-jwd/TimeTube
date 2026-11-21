@@ -32,6 +32,18 @@
   pointer-events: none;
 }
 
+/* Red cutoff zone on YouTube's progress bar when user accepts early cutoff */
+.yt-timefit-cutoff-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  z-index: 45;
+  background: rgba(239, 68, 68, 0.78);
+  border-left: 2px solid #ffffff;
+  pointer-events: none;
+}
+
 /* Highlight ring when guiding user to the player Autoplay toggle */
 .yt-timefit-autoplay-highlight {
   outline: 3px solid #f59e0b !important;
@@ -53,7 +65,7 @@
   line-height: 1.45;
 }
 
-/* Modal overlay for Autoplay setup & Shorts escalation */
+/* Modal overlay for Autoplay setup, Pause, Overrun & Shorts escalation */
 .yt-timefit-backdrop {
   position: fixed;
   inset: 0;
@@ -68,7 +80,7 @@
 
 .yt-timefit-modal {
   width: 100%;
-  max-width: 420px;
+  max-width: 440px;
   padding: 22px 24px;
   border-radius: 16px;
   background: #111827;
