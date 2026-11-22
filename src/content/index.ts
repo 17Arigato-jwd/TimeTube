@@ -17,6 +17,7 @@ import {
   VideoCandidate,
 } from '../core/types';
 import { webext } from '../shared/webext';
+import { syncTopbarControl, updateTopbarBadge } from './topbar';
 
 const STATE_KEY = 'ytTimeFitSessionState';
 const AUTOPLAY_HELP_URL = 'https://support.google.com/youtube/answer/6327615';
@@ -63,6 +64,7 @@ let autoplayObserved: AutoplayObservedState = 'unknown';
 let autoplayGuideActive = false;
 let activeModalId: string | null = null;
 let modalTimerInterval: number | null = null;
+let topbarTickInterval: number | null = null;
 let expiredScreenRendered = false;
 
 // Watch & Shorts player pause / seek / overrun tracking
@@ -127,6 +129,11 @@ function isMainPlayerVideo(el: EventTarget | null): el is HTMLVideoElement {
   );
 }
 
+function isVideoActivelyPlaying(): boolean {
+  const video = document.querySelector<HTMLVideoElement>('video.html5-main-video');
+  return Boolean(video && !video.paused && !video.ended && video.readyState >= 2);
+}
+
 function formatHumanDuration(totalSeconds: number): string {
   const safe = Math.max(1, Math.round(totalSeconds));
   const mins = Math.floor(safe / 60);
@@ -150,18 +157,34 @@ function formatSpeed(speed: number): string {
   return `${Number(speed.toFixed(2))}×`;
 }
 
+/**
+ * Inspects YouTube's watch-player Autoplay toggle carefully (both aria-checked and
+ * tooltip/title text) so we ONLY report 'enabled' when Autoplay is genuinely ON.
+ */
 function readAutoplayToggleState(): AutoplayObservedState {
   const toggleBtn = document.querySelector<HTMLElement>(
     'button[data-tooltip-target-id="ytp-autonav-toggle-button"], .ytp-autonav-toggle-button',
   );
   if (!toggleBtn) return 'unknown';
 
+  const innerSwitch = toggleBtn.querySelector<HTMLElement>('.ytp-autonav-toggle-button[aria-checked], [aria-checked]');
   const checked =
-    toggleBtn.getAttribute('aria-checked') ??
-    toggleBtn.querySelector<HTMLElement>('[aria-checked]')?.getAttribute('aria-checked');
+    innerSwitch?.getAttribute('aria-checked') ??
+    toggleBtn.getAttribute('aria-checked');
 
   if (checked === 'true') return 'enabled';
   if (checked === 'false') return 'disabled';
+
+  const label = (
+    toggleBtn.getAttribute('title') ??
+    toggleBtn.getAttribute('aria-label') ??
+    toggleBtn.getAttribute('data-title-no-tooltip') ??
+    ''
+  ).toLowerCase();
+
+  if (label.includes('autoplay is on')) return 'enabled';
+  if (label.includes('autoplay is off')) return 'disabled';
+
   return 'unknown';
 }
 
@@ -392,7 +415,6 @@ function evaluateMediaOverrun(
     return;
   }
 
-  // If user already accepted early cutoff on this video, keep updating the red bar instead of re-prompting
   if (
     (trigger === 'direct_link' || trigger === 'seek_back' || trigger === 'rate_change') &&
     acceptedEarlyCutoffVideoId === videoId
@@ -543,6 +565,10 @@ function attachDocumentMediaListeners(): void {
 
       if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
 
+      // Silently verify Autoplay in the background while the video plays
+      checkAutoplayWhilePlaying();
+      if (activeModalId !== null) return;
+
       if (timerPausedByVideo || persistedState.status === 'paused') {
         timerPausedByVideo = false;
         persistedState = await webext.runtime.sendMessage<PersistedSessionState>({
@@ -580,7 +606,6 @@ function attachDocumentMediaListeners(): void {
     true,
   );
 
-  // Re-evaluate whenever the user skips backwards / jumps to an earlier timestamp
   document.addEventListener(
     'seeked',
     (event) => {
@@ -598,7 +623,6 @@ function attachDocumentMediaListeners(): void {
     true,
   );
 
-  // Re-evaluate if user slows down playback speed so the video now overruns
   document.addEventListener(
     'ratechange',
     (event) => {
@@ -626,7 +650,7 @@ function renderExpiredTakeover(): void {
       // Fallback if history API is restricted
     }
   }
-  document.title = "Time's up — TimeFit";
+  document.title = "Time's up — TimeTube";
 
   if (expiredScreenRendered && document.getElementById('yt-timefit-expired-screen')) {
     return;
@@ -657,7 +681,7 @@ function renderExpiredTakeover(): void {
 
   const message = document.createElement('p');
   message.textContent =
-    'Your YouTube break has ended. You can start a new session or stop the timer from the TimeFit extension menu whenever you are ready.';
+    'Your YouTube break has ended. You can start a new session or stop the timer from the TimeTube extension menu whenever you are ready.';
 
   card.appendChild(title);
   card.appendChild(message);
@@ -679,55 +703,54 @@ function scheduleExactExpiryTrigger(snapshot: SessionSnapshot): void {
   }
 }
 
-function showAutoplaySetupPrompt(reason: 'initial' | 'detected_enabled'): void {
-  const title =
-    reason === 'detected_enabled'
-      ? 'Autoplay is still turned on'
-      : 'Disable YouTube Autoplay to get started';
-
-  const body =
-    reason === 'detected_enabled'
-      ? 'We paused your video because YouTube Autoplay is enabled. Turn Autoplay off in the video player bar so your break timer can keep you from rolling into another video.'
-      : 'TimeFit needs YouTube Autoplay turned off so videos do not keep playing past your break. You can switch Autoplay off directly on any video player bar.';
-
-  showModal(`autoplay_${reason}`, title, body, [
-    {
-      label: isWatchPage() ? 'Highlight Autoplay toggle' : 'How to disable Autoplay',
-      variant: 'primary',
-      onClick: () => {
-        removeModal();
-        if (isWatchPage()) {
-          autoplayGuideActive = true;
-          highlightAutoplayToggle();
-        } else {
-          window.open(AUTOPLAY_HELP_URL, '_blank', 'noopener');
-        }
+function showAutoplayDetectedPrompt(): void {
+  showModal(
+    'autoplay_detected_enabled',
+    'YouTube Autoplay is turned on',
+    'TimeTube paused this video because YouTube Autoplay is currently enabled. Turn Autoplay off on the video player bar so YouTube does not roll into another video past your break.',
+    [
+      {
+        label: isWatchPage() ? 'Highlight Autoplay toggle' : 'How to disable Autoplay',
+        variant: 'primary',
+        onClick: () => {
+          removeModal();
+          if (isWatchPage()) {
+            autoplayGuideActive = true;
+            highlightAutoplayToggle();
+          } else {
+            window.open(AUTOPLAY_HELP_URL, '_blank', 'noopener');
+          }
+        },
       },
-    },
-    {
-      label: "I've already done it",
-      variant: 'secondary',
-      onClick: async () => {
-        removeModal();
-        persistedState = await webext.runtime.sendMessage<PersistedSessionState>({
-          type: 'SET_AUTOPLAY_ONBOARDING',
-          state: 'claimed_disabled',
-        });
-        checkAutoplayOnWatchPage();
-        runFullSweep();
+      {
+        label: "I've turned it off",
+        variant: 'secondary',
+        onClick: () => {
+          removeModal();
+          autoplayGuideActive = false;
+          const recheck = readAutoplayToggleState();
+          if (recheck === 'enabled') {
+            pauseActiveVideo(true);
+            showAutoplayDetectedPrompt();
+          } else {
+            autoplayObserved = recheck;
+            const video = document.querySelector<HTMLVideoElement>('video.html5-main-video');
+            resumeVideo(video);
+          }
+        },
       },
-    },
-    {
-      label: 'Not now',
-      variant: 'ghost',
-      onClick: () => {
-        removeModal();
-        snoozedUntilReloadOrPopup = true;
-        restoreAllCards();
-        syncShortsNavVisibility();
+      {
+        label: 'Not now',
+        variant: 'ghost',
+        onClick: () => {
+          removeModal();
+          snoozedUntilReloadOrPopup = true;
+          restoreAllCards();
+          syncShortsNavVisibility();
+        },
       },
-    },
-  ]);
+    ],
+  );
 }
 
 function highlightAutoplayToggle(): void {
@@ -742,7 +765,11 @@ function highlightAutoplayToggle(): void {
   }, 6_000);
 }
 
-function checkAutoplayOnWatchPage(): void {
+/**
+ * Checks Autoplay silently in the background ONLY while a video is playing on /watch.
+ * Never prompts when Autoplay is OFF or unmounted.
+ */
+function checkAutoplayWhilePlaying(): void {
   if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
   if (!isWatchPage()) {
     autoplayObserved = 'unknown';
@@ -762,27 +789,19 @@ function checkAutoplayOnWatchPage(): void {
         })
         .then((next) => {
           persistedState = next;
-          runFullSweep();
         })
         .catch(() => undefined);
     }
-    if (activeModalId?.startsWith('autoplay_')) {
+    if (activeModalId === 'autoplay_detected_enabled') {
       removeModal();
     }
     return;
   }
 
-  if (observed === 'enabled' && !autoplayGuideActive) {
-    if (
-      persistedState.autoplayOnboarding === 'claimed_disabled' ||
-      persistedState.autoplayOnboarding === 'verified_disabled'
-    ) {
-      pauseActiveVideo(true);
-      showAutoplaySetupPrompt('detected_enabled');
-    } else if (persistedState.autoplayOnboarding === 'unseen') {
-      pauseActiveVideo(true);
-      showAutoplaySetupPrompt('initial');
-    }
+  // Only pause and prompt when Autoplay is explicitly confirmed ON while a video is playing
+  if (observed === 'enabled' && !autoplayGuideActive && isVideoActivelyPlaying()) {
+    pauseActiveVideo(true);
+    showAutoplayDetectedPrompt();
   }
 }
 
@@ -1124,15 +1143,21 @@ function runFullSweep(): void {
 
   scheduleExactExpiryTrigger(snapshot);
   syncShortsNavVisibility();
+  syncTopbarControl(
+    persistedState,
+    (next) => {
+      persistedState = next;
+      snoozedUntilReloadOrPopup = false;
+      runFullSweep();
+    },
+    () => {
+      snoozedUntilReloadOrPopup = false;
+    },
+  );
 
   if (snoozedUntilReloadOrPopup) {
     restoreAllCards();
     clearEarlyCutoffBar();
-    return;
-  }
-
-  if (snapshot.status === 'needs_autoplay_setup' && persistedState.autoplayOnboarding === 'unseen') {
-    showAutoplaySetupPrompt('initial');
     return;
   }
 
@@ -1234,14 +1259,13 @@ async function mountYouTubeFilterHost(): Promise<void> {
   attachModalInputBlocker();
   attachShortClickInterceptor();
   attachDocumentMediaListeners();
-  checkAutoplayOnWatchPage();
   runFullSweep();
 
   window.addEventListener('yt-navigate-finish', () => {
     consecutiveScrollNudges = 0;
     choseKeepTimerGoing = false;
     window.setTimeout(() => {
-      checkAutoplayOnWatchPage();
+      checkAutoplayWhilePlaying();
       runFullSweep();
     }, 350);
   });
@@ -1256,9 +1280,15 @@ async function mountYouTubeFilterHost(): Promise<void> {
 
   sweepTimer = window.setInterval(() => {
     if (document.hidden && !expiredScreenRendered) return;
-    checkAutoplayOnWatchPage();
+    checkAutoplayWhilePlaying();
     runFullSweep();
   }, SWEEP_INTERVAL_MS);
+
+  // Keep the YouTube header badge ticking smoothly every second (especially for 53s, 42s, 3s)
+  topbarTickInterval = window.setInterval(() => {
+    if (document.hidden || expiredScreenRendered) return;
+    updateTopbarBadge(persistedState);
+  }, 1000);
 
   webext.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local' || !changes[STATE_KEY]?.newValue) return;
@@ -1269,13 +1299,14 @@ async function mountYouTubeFilterHost(): Promise<void> {
   webext.runtime.onMessage.addListener((msg) => {
     if (msg && typeof msg === 'object' && (msg as { type?: string }).type === 'WAKE_FROM_POPUP') {
       snoozedUntilReloadOrPopup = false;
-      checkAutoplayOnWatchPage();
+      checkAutoplayWhilePlaying();
       runFullSweep();
     }
   });
 
   window.addEventListener('pagehide', () => {
     if (sweepTimer !== null) window.clearInterval(sweepTimer);
+    if (topbarTickInterval !== null) window.clearInterval(topbarTickInterval);
     if (exactExpiryTimer !== null) window.clearTimeout(exactExpiryTimer);
     if (pausePromptTimer !== null) window.clearTimeout(pausePromptTimer);
     if (seekOverrunTimer !== null) window.clearTimeout(seekOverrunTimer);

@@ -1,4 +1,16 @@
 // src/core/duration.ts
+function formatApproxRemaining(remainingMs) {
+  const totalSec = Math.max(0, Math.ceil(remainingMs / 1e3));
+  if (totalSec === 0) return "0s";
+  if (totalSec < 60) return `${totalSec}s`;
+  const totalMin = totalSec / 60;
+  if (totalMin < 59.5) {
+    return `${Math.max(1, Math.round(totalMin))}m`;
+  }
+  const halfHours = Math.round(totalSec / 3600 * 2) / 2;
+  const formatted = Number.isInteger(halfHours) ? String(halfHours) : halfHours.toFixed(1);
+  return `${formatted}hr`;
+}
 function extractLengthSecondsFromHtml(html) {
   const match = html.match(/"lengthSeconds"\s*:\s*"(\d+)"/);
   if (!match?.[1]) return null;
@@ -76,8 +88,8 @@ var webext = rawApi;
 // src/background/index.ts
 var STATE_KEY = "ytTimeFitSessionState";
 var SHORT_CACHE_KEY = "ytTimeFitShortDurationCache";
-var EXPIRY_ALARM = "yt-timefit-session-expiry";
-var BADGE_TICK_ALARM = "yt-timefit-badge-tick";
+var EXPIRY_ALARM = "yt-timetube-session-expiry";
+var BADGE_TICK_ALARM = "yt-timetube-badge-tick";
 var SHORT_CACHE_TTL_MS = 7 * 24 * 60 * 6e4;
 var inflightShortFetches = /* @__PURE__ */ new Map();
 async function loadState() {
@@ -110,24 +122,25 @@ async function syncAlarmsAndBadge(state) {
   const nowMs = Date.now();
   const remainingMs = computeRemainingMs(state, nowMs);
   if (state.status === "paused") {
-    await setBadge("II", "#d97706");
+    const label = remainingMs !== null ? formatApproxRemaining(remainingMs) : "II";
+    await setBadge(label, "#d97706");
     return;
   }
   if (state.status === "active" && state.spec) {
     if (state.spec.mode === "maxLength") {
-      await setBadge(`${state.spec.maxMinutes}m`, "#2563eb");
+      await setBadge(formatApproxRemaining(state.spec.maxMinutes * 6e4), "#2563eb");
       return;
     }
     if (state.endsAtMs !== null && remainingMs !== null && remainingMs > 0) {
       webext.alarms.create(EXPIRY_ALARM, { when: state.endsAtMs });
       webext.alarms.create(BADGE_TICK_ALARM, { periodInMinutes: 1 });
-      const minsLeft = Math.max(1, Math.ceil(remainingMs / 6e4));
-      await setBadge(`${minsLeft}m`, minsLeft <= 5 ? "#dc2626" : "#0f766e");
+      const label = formatApproxRemaining(remainingMs);
+      await setBadge(label, remainingMs <= 5 * 6e4 ? "#ff0033" : "#0f766e");
       return;
     }
   }
   if (state.status === "expired") {
-    await setBadge("0m", "#dc2626");
+    await setBadge("0s", "#ff0033");
   } else {
     await setBadge("", "#0f766e");
   }
@@ -201,6 +214,7 @@ async function handleMessage(msg) {
         await saveState(expired);
         return expired;
       }
+      await syncAlarmsAndBadge(state);
       return state;
     }
     case "START_SESSION": {

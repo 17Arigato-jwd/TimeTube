@@ -38,6 +38,18 @@
     }
     return `${minutes}:${pad(seconds)}`;
   }
+  function formatApproxRemaining(remainingMs) {
+    const totalSec = Math.max(0, Math.ceil(remainingMs / 1e3));
+    if (totalSec === 0) return "0s";
+    if (totalSec < 60) return `${totalSec}s`;
+    const totalMin = totalSec / 60;
+    if (totalMin < 59.5) {
+      return `${Math.max(1, Math.round(totalMin))}m`;
+    }
+    const halfHours = Math.round(totalSec / 3600 * 2) / 2;
+    const formatted = Number.isInteger(halfHours) ? String(halfHours) : halfHours.toFixed(1);
+    return `${formatted}hr`;
+  }
   function extractShortIdFromHref(href) {
     const match = href.match(/\/shorts\/([a-zA-Z0-9_-]{6,})/);
     return match?.[1] ?? null;
@@ -149,8 +161,6 @@
     let derivedStatus;
     if (snoozed) {
       derivedStatus = "snoozed";
-    } else if (state.autoplayOnboarding === "unseen") {
-      derivedStatus = "needs_autoplay_setup";
     } else if (autoplayObserved2 === "enabled") {
       derivedStatus = "needs_autoplay_setup";
     } else if (isTimedExpired) {
@@ -215,6 +225,351 @@
   var rawApi = globalThis.browser ?? globalThis.chrome;
   var webext = rawApi;
 
+  // src/content/topbar.ts
+  var popoverOpen = false;
+  var selectedMode = "countdown";
+  var lastState = null;
+  var outsideClickBound = false;
+  function formatClock(ms) {
+    const totalSec = Math.max(0, Math.ceil(ms / 1e3));
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+    return `${mins}:${String(secs).padStart(2, "0")}`;
+  }
+  function isDarkTheme() {
+    return document.documentElement.hasAttribute("dark");
+  }
+  function getHeaderButtonsContainer() {
+    return document.querySelector("ytd-masthead #end #buttons") ?? document.querySelector("#masthead-container #end #buttons") ?? document.querySelector("#end #buttons");
+  }
+  function findCreateButtonSlot(container) {
+    const candidates = Array.from(container.children);
+    for (const child of candidates) {
+      if (child.id === "yt-timetube-topbar-wrap") continue;
+      const text = child.textContent?.trim().toLowerCase() ?? "";
+      const aria = child.querySelector("[aria-label]")?.getAttribute("aria-label")?.toLowerCase() ?? "";
+      if (text.includes("create") || aria.includes("create")) {
+        return child;
+      }
+    }
+    return candidates[0] ?? null;
+  }
+  function closePopover() {
+    popoverOpen = false;
+    const pop = document.getElementById("yt-timetube-popover");
+    if (pop) pop.classList.add("yt-tt-hidden");
+  }
+  function buildPopover(onStateChange) {
+    const pop = document.createElement("div");
+    pop.id = "yt-timetube-popover";
+    pop.className = "yt-tt-popover yt-tt-hidden";
+    pop.setAttribute("role", "dialog");
+    pop.setAttribute("aria-label", "TimeTube Controls");
+    pop.innerHTML = `
+    <div class="yt-tt-pop-header">
+      <div class="yt-tt-pop-brand">
+        <img class="yt-tt-pop-logo" alt="TimeTube" />
+        <strong>TimeTube</strong>
+      </div>
+      <span id="yt-tt-status-pill" class="yt-tt-pill yt-tt-pill-idle">Idle</span>
+    </div>
+
+    <div id="yt-tt-active-banner" class="yt-tt-card yt-tt-active-card yt-tt-hidden">
+      <div class="yt-tt-active-time">
+        <span class="yt-tt-label">Remaining</span>
+        <strong id="yt-tt-remaining">--:--</strong>
+      </div>
+      <div class="yt-tt-active-actions">
+        <button id="yt-tt-extend" type="button" class="yt-tt-btn yt-tt-btn-secondary">+5 min</button>
+        <button id="yt-tt-stop" type="button" class="yt-tt-btn yt-tt-btn-danger">Stop</button>
+      </div>
+    </div>
+
+    <div class="yt-tt-card">
+      <div class="yt-tt-tabs">
+        <button type="button" class="yt-tt-tab active" data-mode="countdown">Timer</button>
+        <button type="button" class="yt-tt-tab" data-mode="until">End Time</button>
+        <button type="button" class="yt-tt-tab" data-mode="maxLength">Max Length</button>
+      </div>
+
+      <div id="yt-tt-panel-countdown" class="yt-tt-panel">
+        <div class="yt-tt-presets">
+          <button type="button" class="yt-tt-preset" data-mins="15">15m</button>
+          <button type="button" class="yt-tt-preset" data-mins="25">25m</button>
+          <button type="button" class="yt-tt-preset" data-mins="45">45m</button>
+        </div>
+        <label class="yt-tt-row">
+          <span>Custom minutes</span>
+          <input id="yt-tt-countdown-mins" type="number" min="1" max="360" value="25" />
+        </label>
+      </div>
+
+      <div id="yt-tt-panel-until" class="yt-tt-panel yt-tt-hidden">
+        <label class="yt-tt-row">
+          <span>Break ends at</span>
+          <input id="yt-tt-until-time" type="time" value="17:00" />
+        </label>
+      </div>
+
+      <div id="yt-tt-panel-maxLength" class="yt-tt-panel yt-tt-hidden">
+        <label class="yt-tt-row">
+          <span>Max video length (min)</span>
+          <input id="yt-tt-max-mins" type="number" min="1" max="240" value="15" />
+        </label>
+      </div>
+
+      <button id="yt-tt-start" type="button" class="yt-tt-btn yt-tt-btn-primary yt-tt-full">Start Session</button>
+    </div>
+
+    <div class="yt-tt-card yt-tt-settings">
+      <h3>Guardrails</h3>
+      <label class="yt-tt-row">
+        <span>Disable Shorts (standard player)</span>
+        <input id="yt-tt-disable-shorts" type="checkbox" />
+      </label>
+      <label id="yt-tt-cutoff-row" class="yt-tt-row">
+        <span>Force leave Shorts before end</span>
+        <select id="yt-tt-shorts-cutoff">
+          <option value="5">5 min left</option>
+          <option value="10">10 min left</option>
+        </select>
+      </label>
+      <label class="yt-tt-row">
+        <span>Unfinishable videos</span>
+        <select id="yt-tt-exceed-action">
+          <option value="hide">Hide completely</option>
+          <option value="dim">Dim thumbnail</option>
+        </select>
+      </label>
+      <label class="yt-tt-row">
+        <span>Hide Shorts sidebar/nav button</span>
+        <input id="yt-tt-hide-nav" type="checkbox" checked />
+      </label>
+      <label class="yt-tt-row">
+        <span>Show duration badge on Shorts</span>
+        <input id="yt-tt-show-durations" type="checkbox" checked />
+      </label>
+    </div>
+  `;
+    const logoImg = pop.querySelector(".yt-tt-pop-logo");
+    if (logoImg) {
+      logoImg.src = webext.runtime.getURL("assets/logo-main.svg");
+    }
+    pop.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        closePopover();
+      }
+      e.stopPropagation();
+    });
+    pop.querySelectorAll(".yt-tt-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const mode = tab.dataset.mode;
+        if (!mode) return;
+        selectedMode = mode;
+        pop.querySelectorAll(".yt-tt-tab").forEach((t) => {
+          t.classList.toggle("active", t.dataset.mode === mode);
+        });
+        pop.querySelector("#yt-tt-panel-countdown")?.classList.toggle("yt-tt-hidden", mode !== "countdown");
+        pop.querySelector("#yt-tt-panel-until")?.classList.toggle("yt-tt-hidden", mode !== "until");
+        pop.querySelector("#yt-tt-panel-maxLength")?.classList.toggle("yt-tt-hidden", mode !== "maxLength");
+      });
+    });
+    pop.querySelectorAll(".yt-tt-preset").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const input = pop.querySelector("#yt-tt-countdown-mins");
+        if (input && btn.dataset.mins) input.value = btn.dataset.mins;
+      });
+    });
+    pop.querySelector("#yt-tt-start")?.addEventListener("click", async () => {
+      const countdownVal = Number(pop.querySelector("#yt-tt-countdown-mins")?.value || 25);
+      const untilVal = pop.querySelector("#yt-tt-until-time")?.value || "17:00";
+      const maxVal = Number(pop.querySelector("#yt-tt-max-mins")?.value || 15);
+      let spec;
+      if (selectedMode === "countdown") {
+        spec = { mode: "countdown", durationMinutes: Math.max(1, countdownVal) };
+      } else if (selectedMode === "until") {
+        spec = { mode: "until", endTime: untilVal };
+      } else {
+        spec = { mode: "maxLength", maxMinutes: Math.max(1, maxVal) };
+      }
+      const next = await webext.runtime.sendMessage({
+        type: "START_SESSION",
+        spec
+      });
+      onStateChange(next);
+    });
+    pop.querySelector("#yt-tt-extend")?.addEventListener("click", async () => {
+      const next = await webext.runtime.sendMessage({
+        type: "EXTEND_SESSION",
+        additionalMinutes: 5
+      });
+      onStateChange(next);
+    });
+    pop.querySelector("#yt-tt-stop")?.addEventListener("click", async () => {
+      const next = await webext.runtime.sendMessage({
+        type: "STOP_SESSION"
+      });
+      onStateChange(next);
+    });
+    const syncPolicy = async () => {
+      const disableShorts = Boolean(pop.querySelector("#yt-tt-disable-shorts")?.checked);
+      const cutoff = Number(pop.querySelector("#yt-tt-shorts-cutoff")?.value) === 10 ? 10 : 5;
+      const exceed = pop.querySelector("#yt-tt-exceed-action")?.value === "dim" ? "dim" : "hide";
+      const hideNav = Boolean(pop.querySelector("#yt-tt-hide-nav")?.checked);
+      const showDur = Boolean(pop.querySelector("#yt-tt-show-durations")?.checked);
+      const next = await webext.runtime.sendMessage({
+        type: "UPDATE_POLICY",
+        patch: {
+          shortsMode: disableShorts ? "redirectToWatch" : "escalatingNudge",
+          shortsLockCutoffMinutes: cutoff,
+          exceedAction: exceed,
+          hideShortsNavButton: hideNav,
+          showShortDurationBadges: showDur
+        }
+      });
+      onStateChange(next);
+    };
+    pop.querySelector("#yt-tt-disable-shorts")?.addEventListener("change", syncPolicy);
+    pop.querySelector("#yt-tt-shorts-cutoff")?.addEventListener("change", syncPolicy);
+    pop.querySelector("#yt-tt-exceed-action")?.addEventListener("change", syncPolicy);
+    pop.querySelector("#yt-tt-hide-nav")?.addEventListener("change", syncPolicy);
+    pop.querySelector("#yt-tt-show-durations")?.addEventListener("change", syncPolicy);
+    return pop;
+  }
+  function syncTopbarControl(state, onStateChange, onWake) {
+    lastState = state;
+    const container = getHeaderButtonsContainer();
+    if (!container) return;
+    let wrap = document.getElementById("yt-timetube-topbar-wrap");
+    if (!wrap) {
+      wrap = document.createElement("div");
+      wrap.id = "yt-timetube-topbar-wrap";
+      wrap.className = "yt-tt-topbar-wrap";
+      const btn = document.createElement("button");
+      btn.id = "yt-timetube-topbar-btn";
+      btn.type = "button";
+      btn.className = "yt-tt-topbar-btn";
+      btn.setAttribute("aria-label", "Open TimeTube menu");
+      btn.title = "TimeTube";
+      const icon = document.createElement("img");
+      icon.id = "yt-timetube-topbar-icon";
+      icon.className = "yt-tt-topbar-icon";
+      icon.alt = "TimeTube";
+      const badge = document.createElement("span");
+      badge.id = "yt-timetube-topbar-badge";
+      badge.className = "yt-tt-topbar-badge yt-tt-hidden";
+      btn.appendChild(icon);
+      btn.appendChild(badge);
+      wrap.appendChild(btn);
+      const popover = buildPopover(onStateChange);
+      wrap.appendChild(popover);
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onWake();
+        popoverOpen = !popoverOpen;
+        popover.classList.toggle("yt-tt-hidden", !popoverOpen);
+        if (popoverOpen && lastState) {
+          updatePopoverUI(popover, lastState);
+        }
+      });
+      const createSlot = findCreateButtonSlot(container);
+      if (createSlot) {
+        container.insertBefore(wrap, createSlot);
+      } else {
+        container.prepend(wrap);
+      }
+      if (!outsideClickBound) {
+        outsideClickBound = true;
+        document.addEventListener("click", (event) => {
+          if (!popoverOpen) return;
+          const wrapEl = document.getElementById("yt-timetube-topbar-wrap");
+          if (wrapEl && !wrapEl.contains(event.target)) {
+            closePopover();
+          }
+        });
+      }
+    }
+    updateTopbarBadge(state);
+    const pop = document.getElementById("yt-timetube-popover");
+    if (pop && popoverOpen) {
+      updatePopoverUI(pop, state);
+    }
+  }
+  function updateTopbarBadge(state) {
+    const icon = document.getElementById("yt-timetube-topbar-icon");
+    const badge = document.getElementById("yt-timetube-topbar-badge");
+    if (!icon || !badge) return;
+    const remainingMs = computeRemainingMs(state, Date.now());
+    const hasActiveBadge = state.status === "active" || state.status === "paused" || state.status === "expired";
+    const lightMode = !isDarkTheme();
+    icon.classList.toggle("yt-tt-icon-light", lightMode);
+    if (!hasActiveBadge) {
+      icon.src = webext.runtime.getURL("assets/topbar-empty.svg");
+      badge.classList.add("yt-tt-hidden");
+      badge.textContent = "";
+      return;
+    }
+    icon.src = webext.runtime.getURL("assets/topbar-badge.svg");
+    let label = "";
+    if (state.status === "expired") {
+      label = "0s";
+    } else if (state.spec?.mode === "maxLength") {
+      label = formatApproxRemaining(state.spec.maxMinutes * 6e4);
+    } else if (remainingMs !== null) {
+      label = formatApproxRemaining(remainingMs);
+    }
+    if (label) {
+      badge.textContent = label;
+      badge.classList.remove("yt-tt-hidden");
+      badge.classList.toggle("yt-tt-badge-paused", state.status === "paused");
+    } else {
+      badge.classList.add("yt-tt-hidden");
+    }
+  }
+  function updatePopoverUI(pop, state) {
+    const pill = pop.querySelector("#yt-tt-status-pill");
+    const activeBanner = pop.querySelector("#yt-tt-active-banner");
+    const remainingEl = pop.querySelector("#yt-tt-remaining");
+    const extendBtn = pop.querySelector("#yt-tt-extend");
+    const remainingMs = computeRemainingMs(state, Date.now());
+    if (pill && activeBanner && remainingEl && extendBtn) {
+      if (state.status === "active" || state.status === "paused") {
+        pill.textContent = state.status === "paused" ? "Paused" : state.spec?.mode === "maxLength" ? "Max Length" : "Active";
+        pill.className = state.status === "paused" ? "yt-tt-pill yt-tt-pill-paused" : "yt-tt-pill yt-tt-pill-active";
+        activeBanner.classList.remove("yt-tt-hidden");
+        if (state.spec?.mode === "maxLength") {
+          remainingEl.textContent = `\u2264 ${state.spec.maxMinutes}m`;
+          extendBtn.classList.add("yt-tt-hidden");
+        } else {
+          remainingEl.textContent = remainingMs !== null ? formatClock(remainingMs) : "--:--";
+          extendBtn.classList.remove("yt-tt-hidden");
+        }
+      } else if (state.status === "expired") {
+        pill.textContent = "Break Ended";
+        pill.className = "yt-tt-pill yt-tt-pill-expired";
+        activeBanner.classList.remove("yt-tt-hidden");
+        remainingEl.textContent = "0:00";
+        extendBtn.classList.remove("yt-tt-hidden");
+      } else {
+        pill.textContent = "Idle";
+        pill.className = "yt-tt-pill yt-tt-pill-idle";
+        activeBanner.classList.add("yt-tt-hidden");
+      }
+    }
+    const disableShorts = pop.querySelector("#yt-tt-disable-shorts");
+    const cutoffRow = pop.querySelector("#yt-tt-cutoff-row");
+    const cutoffSelect = pop.querySelector("#yt-tt-shorts-cutoff");
+    const exceedSelect = pop.querySelector("#yt-tt-exceed-action");
+    const hideNav = pop.querySelector("#yt-tt-hide-nav");
+    const showDur = pop.querySelector("#yt-tt-show-durations");
+    if (disableShorts) disableShorts.checked = state.policy.shortsMode === "redirectToWatch";
+    if (cutoffRow) cutoffRow.classList.toggle("yt-tt-hidden", state.policy.shortsMode === "redirectToWatch");
+    if (cutoffSelect) cutoffSelect.value = String(state.policy.shortsLockCutoffMinutes);
+    if (exceedSelect) exceedSelect.value = state.policy.exceedAction;
+    if (hideNav) hideNav.checked = state.policy.hideShortsNavButton;
+    if (showDur) showDur.checked = state.policy.showShortDurationBadges;
+  }
+
   // src/content/index.ts
   var STATE_KEY = "ytTimeFitSessionState";
   var AUTOPLAY_HELP_URL = "https://support.google.com/youtube/answer/6327615";
@@ -257,6 +612,7 @@
   var autoplayGuideActive = false;
   var activeModalId = null;
   var modalTimerInterval = null;
+  var topbarTickInterval = null;
   var expiredScreenRendered = false;
   var mediaListenersAttached = false;
   var inputBlockerAttached = false;
@@ -310,6 +666,10 @@
       el.closest("#shorts-player, ytd-reel-video-renderer, .html5-video-player") || el.classList.contains("html5-main-video")
     );
   }
+  function isVideoActivelyPlaying() {
+    const video = document.querySelector("video.html5-main-video");
+    return Boolean(video && !video.paused && !video.ended && video.readyState >= 2);
+  }
   function formatHumanDuration(totalSeconds) {
     const safe = Math.max(1, Math.round(totalSeconds));
     const mins = Math.floor(safe / 60);
@@ -335,9 +695,13 @@
       'button[data-tooltip-target-id="ytp-autonav-toggle-button"], .ytp-autonav-toggle-button'
     );
     if (!toggleBtn) return "unknown";
-    const checked = toggleBtn.getAttribute("aria-checked") ?? toggleBtn.querySelector("[aria-checked]")?.getAttribute("aria-checked");
+    const innerSwitch = toggleBtn.querySelector(".ytp-autonav-toggle-button[aria-checked], [aria-checked]");
+    const checked = innerSwitch?.getAttribute("aria-checked") ?? toggleBtn.getAttribute("aria-checked");
     if (checked === "true") return "enabled";
     if (checked === "false") return "disabled";
+    const label = (toggleBtn.getAttribute("title") ?? toggleBtn.getAttribute("aria-label") ?? toggleBtn.getAttribute("data-title-no-tooltip") ?? "").toLowerCase();
+    if (label.includes("autoplay is on")) return "enabled";
+    if (label.includes("autoplay is off")) return "disabled";
     return "unknown";
   }
   function pauseActiveVideo(byExtension = true) {
@@ -634,6 +998,8 @@
           pausePromptTimer = null;
         }
         if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
+        checkAutoplayWhilePlaying();
+        if (activeModalId !== null) return;
         if (timerPausedByVideo || persistedState.status === "paused") {
           timerPausedByVideo = false;
           persistedState = await webext.runtime.sendMessage({
@@ -705,7 +1071,7 @@
       } catch {
       }
     }
-    document.title = "Time's up \u2014 TimeFit";
+    document.title = "Time's up \u2014 TimeTube";
     if (expiredScreenRendered && document.getElementById("yt-timefit-expired-screen")) {
       return;
     }
@@ -728,7 +1094,7 @@
     const title = document.createElement("h1");
     title.textContent = "Time's up :)";
     const message = document.createElement("p");
-    message.textContent = "Your YouTube break has ended. You can start a new session or stop the timer from the TimeFit extension menu whenever you are ready.";
+    message.textContent = "Your YouTube break has ended. You can start a new session or stop the timer from the TimeTube extension menu whenever you are ready.";
     card.appendChild(title);
     card.appendChild(message);
     screen.appendChild(card);
@@ -747,47 +1113,54 @@
       }, delay);
     }
   }
-  function showAutoplaySetupPrompt(reason) {
-    const title = reason === "detected_enabled" ? "Autoplay is still turned on" : "Disable YouTube Autoplay to get started";
-    const body = reason === "detected_enabled" ? "We paused your video because YouTube Autoplay is enabled. Turn Autoplay off in the video player bar so your break timer can keep you from rolling into another video." : "TimeFit needs YouTube Autoplay turned off so videos do not keep playing past your break. You can switch Autoplay off directly on any video player bar.";
-    showModal(`autoplay_${reason}`, title, body, [
-      {
-        label: isWatchPage() ? "Highlight Autoplay toggle" : "How to disable Autoplay",
-        variant: "primary",
-        onClick: () => {
-          removeModal();
-          if (isWatchPage()) {
-            autoplayGuideActive = true;
-            highlightAutoplayToggle();
-          } else {
-            window.open(AUTOPLAY_HELP_URL, "_blank", "noopener");
+  function showAutoplayDetectedPrompt() {
+    showModal(
+      "autoplay_detected_enabled",
+      "YouTube Autoplay is turned on",
+      "TimeTube paused this video because YouTube Autoplay is currently enabled. Turn Autoplay off on the video player bar so YouTube does not roll into another video past your break.",
+      [
+        {
+          label: isWatchPage() ? "Highlight Autoplay toggle" : "How to disable Autoplay",
+          variant: "primary",
+          onClick: () => {
+            removeModal();
+            if (isWatchPage()) {
+              autoplayGuideActive = true;
+              highlightAutoplayToggle();
+            } else {
+              window.open(AUTOPLAY_HELP_URL, "_blank", "noopener");
+            }
+          }
+        },
+        {
+          label: "I've turned it off",
+          variant: "secondary",
+          onClick: () => {
+            removeModal();
+            autoplayGuideActive = false;
+            const recheck = readAutoplayToggleState();
+            if (recheck === "enabled") {
+              pauseActiveVideo(true);
+              showAutoplayDetectedPrompt();
+            } else {
+              autoplayObserved = recheck;
+              const video = document.querySelector("video.html5-main-video");
+              resumeVideo(video);
+            }
+          }
+        },
+        {
+          label: "Not now",
+          variant: "ghost",
+          onClick: () => {
+            removeModal();
+            snoozedUntilReloadOrPopup = true;
+            restoreAllCards();
+            syncShortsNavVisibility();
           }
         }
-      },
-      {
-        label: "I've already done it",
-        variant: "secondary",
-        onClick: async () => {
-          removeModal();
-          persistedState = await webext.runtime.sendMessage({
-            type: "SET_AUTOPLAY_ONBOARDING",
-            state: "claimed_disabled"
-          });
-          checkAutoplayOnWatchPage();
-          runFullSweep();
-        }
-      },
-      {
-        label: "Not now",
-        variant: "ghost",
-        onClick: () => {
-          removeModal();
-          snoozedUntilReloadOrPopup = true;
-          restoreAllCards();
-          syncShortsNavVisibility();
-        }
-      }
-    ]);
+      ]
+    );
   }
   function highlightAutoplayToggle() {
     const toggleBtn = document.querySelector(
@@ -800,7 +1173,7 @@
       toggleBtn.classList.remove("yt-timefit-autoplay-highlight");
     }, 6e3);
   }
-  function checkAutoplayOnWatchPage() {
+  function checkAutoplayWhilePlaying() {
     if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
     if (!isWatchPage()) {
       autoplayObserved = "unknown";
@@ -816,22 +1189,16 @@
           state: "verified_disabled"
         }).then((next) => {
           persistedState = next;
-          runFullSweep();
         }).catch(() => void 0);
       }
-      if (activeModalId?.startsWith("autoplay_")) {
+      if (activeModalId === "autoplay_detected_enabled") {
         removeModal();
       }
       return;
     }
-    if (observed === "enabled" && !autoplayGuideActive) {
-      if (persistedState.autoplayOnboarding === "claimed_disabled" || persistedState.autoplayOnboarding === "verified_disabled") {
-        pauseActiveVideo(true);
-        showAutoplaySetupPrompt("detected_enabled");
-      } else if (persistedState.autoplayOnboarding === "unseen") {
-        pauseActiveVideo(true);
-        showAutoplaySetupPrompt("initial");
-      }
+    if (observed === "enabled" && !autoplayGuideActive && isVideoActivelyPlaying()) {
+      pauseActiveVideo(true);
+      showAutoplayDetectedPrompt();
     }
   }
   function syncShortsNavVisibility() {
@@ -1119,13 +1486,20 @@
     }
     scheduleExactExpiryTrigger(snapshot);
     syncShortsNavVisibility();
+    syncTopbarControl(
+      persistedState,
+      (next) => {
+        persistedState = next;
+        snoozedUntilReloadOrPopup = false;
+        runFullSweep();
+      },
+      () => {
+        snoozedUntilReloadOrPopup = false;
+      }
+    );
     if (snoozedUntilReloadOrPopup) {
       restoreAllCards();
       clearEarlyCutoffBar();
-      return;
-    }
-    if (snapshot.status === "needs_autoplay_setup" && persistedState.autoplayOnboarding === "unseen") {
-      showAutoplaySetupPrompt("initial");
       return;
     }
     evaluateShortsPageEscalation(snapshot);
@@ -1211,13 +1585,12 @@
     attachModalInputBlocker();
     attachShortClickInterceptor();
     attachDocumentMediaListeners();
-    checkAutoplayOnWatchPage();
     runFullSweep();
     window.addEventListener("yt-navigate-finish", () => {
       consecutiveScrollNudges = 0;
       choseKeepTimerGoing = false;
       window.setTimeout(() => {
-        checkAutoplayOnWatchPage();
+        checkAutoplayWhilePlaying();
         runFullSweep();
       }, 350);
     });
@@ -1230,9 +1603,13 @@
     });
     sweepTimer = window.setInterval(() => {
       if (document.hidden && !expiredScreenRendered) return;
-      checkAutoplayOnWatchPage();
+      checkAutoplayWhilePlaying();
       runFullSweep();
     }, SWEEP_INTERVAL_MS);
+    topbarTickInterval = window.setInterval(() => {
+      if (document.hidden || expiredScreenRendered) return;
+      updateTopbarBadge(persistedState);
+    }, 1e3);
     webext.storage.onChanged.addListener((changes, area) => {
       if (area !== "local" || !changes[STATE_KEY]?.newValue) return;
       persistedState = changes[STATE_KEY].newValue;
@@ -1241,12 +1618,13 @@
     webext.runtime.onMessage.addListener((msg) => {
       if (msg && typeof msg === "object" && msg.type === "WAKE_FROM_POPUP") {
         snoozedUntilReloadOrPopup = false;
-        checkAutoplayOnWatchPage();
+        checkAutoplayWhilePlaying();
         runFullSweep();
       }
     });
     window.addEventListener("pagehide", () => {
       if (sweepTimer !== null) window.clearInterval(sweepTimer);
+      if (topbarTickInterval !== null) window.clearInterval(topbarTickInterval);
       if (exactExpiryTimer !== null) window.clearTimeout(exactExpiryTimer);
       if (pausePromptTimer !== null) window.clearTimeout(pausePromptTimer);
       if (seekOverrunTimer !== null) window.clearTimeout(seekOverrunTimer);

@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   extractLengthSecondsFromHtml,
   extractShortIdFromHref,
+  formatApproxRemaining,
   formatDurationBadge,
   parseDurationText,
 } from '../src/core/duration';
@@ -23,7 +24,7 @@ import {
 
 function makeActiveSession(overrides: Partial<PersistedSessionState> = {}): PersistedSessionState {
   const startedAtMs = Date.parse('2026-11-21T16:00:00Z');
-  const endsAtMs = Date.parse('2026-11-21T16:40:00Z'); // 40-minute break
+  const endsAtMs = Date.parse('2026-11-21T16:40:00Z');
   return {
     ...INITIAL_PERSISTED_STATE,
     id: 'sess_1',
@@ -47,6 +48,17 @@ test('parseDurationText handles MM:SS, HH:MM:SS, ARIA labels, and ignores LIVE /
   assert.equal(parseDurationText('New'), null);
   assert.equal(parseDurationText('LIVE'), null);
   assert.equal(parseDurationText('SHORTS'), null);
+});
+
+test('formatApproxRemaining formats 1hr, 1.5hr, 30m, 2m, 53s, 42s, 3s cleanly', () => {
+  assert.equal(formatApproxRemaining(90 * 60_000), '1.5hr');
+  assert.equal(formatApproxRemaining(60 * 60_000), '1hr');
+  assert.equal(formatApproxRemaining(30 * 60_000), '30m');
+  assert.equal(formatApproxRemaining(2 * 60_000), '2m');
+  assert.equal(formatApproxRemaining(53_000), '53s');
+  assert.equal(formatApproxRemaining(42_000), '42s');
+  assert.equal(formatApproxRemaining(3_000), '3s');
+  assert.equal(formatApproxRemaining(0), '0s');
 });
 
 test('formatDurationBadge & HTML duration extraction work accurately', () => {
@@ -107,26 +119,24 @@ test('graduated Shorts escalation fires at 50% -> 25% -> final 5/10 min cutoff',
   assert.equal(computeShortsStage(disabledShorts, Date.parse('2026-11-21T16:01:00Z')), 'locked_to_watch');
 });
 
-test('Autoplay onboarding, claim verification, and Not Now snooze states work properly', () => {
+test('Autoplay only blocks when explicitly observed as enabled while playing', () => {
   const unseen = makeActiveSession({ autoplayOnboarding: 'unseen' });
   const now = Date.parse('2026-11-21T16:10:00Z');
 
-  assert.equal(buildSessionSnapshot(unseen, now).status, 'needs_autoplay_setup');
-  assert.equal(buildSessionSnapshot(unseen, now, { snoozed: true }).status, 'snoozed');
-
-  const claimed = makeActiveSession({ autoplayOnboarding: 'claimed_disabled' });
-  assert.equal(buildSessionSnapshot(claimed, now, { autoplayObserved: 'unknown' }).status, 'active');
-  assert.equal(buildSessionSnapshot(claimed, now, { autoplayObserved: 'enabled' }).status, 'needs_autoplay_setup');
-  assert.equal(buildSessionSnapshot(claimed, now, { autoplayObserved: 'disabled' }).status, 'active');
+  // Unseen / disabled / unknown never interrupt browsing
+  assert.equal(buildSessionSnapshot(unseen, now, { autoplayObserved: 'unknown' }).status, 'active');
+  assert.equal(buildSessionSnapshot(unseen, now, { autoplayObserved: 'disabled' }).status, 'active');
+  // Confirmed ON triggers Autoplay prompt
+  assert.equal(buildSessionSnapshot(unseen, now, { autoplayObserved: 'enabled' }).status, 'needs_autoplay_setup');
+  // Snoozing overrides prompt until reload/popup
+  assert.equal(buildSessionSnapshot(unseen, now, { autoplayObserved: 'enabled', snoozed: true }).status, 'snoozed');
 });
 
 test('computePlaybackOverrun calculates exact dynamic speeds (<=2x), extra seconds, and red cutoff %', () => {
-  // Plenty of time left: 10 min video (600s) at 0s with 30 min (1800s) left -> no overrun
   const plenty = computePlaybackOverrun(0, 600, 1, 30 * 60_000);
   assert.equal(plenty.isOverrunning, false);
   assert.equal(plenty.suggestedSpeed, null);
 
-  // 1000s total, at 215s (785s left), 500s left on timer -> 785 / 500 = 1.57x!
   const mid = computePlaybackOverrun(215, 1000, 1, 500_000);
   assert.equal(mid.isOverrunning, true);
   assert.equal(mid.extraSecondsNeeded, 285);
@@ -134,7 +144,6 @@ test('computePlaybackOverrun calculates exact dynamic speeds (<=2x), extra secon
   assert.equal(mid.cutoffVideoSeconds, 715);
   assert.equal(mid.cutoffPercent, 71.5);
 
-  // Needs > 2.0x (1500s left, 500s timer -> 3.0x): suggestedSpeed is null
   const tooLong = computePlaybackOverrun(0, 1500, 1, 500_000);
   assert.equal(tooLong.isOverrunning, true);
   assert.equal(tooLong.suggestedSpeed, null);

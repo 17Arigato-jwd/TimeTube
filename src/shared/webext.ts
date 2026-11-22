@@ -37,6 +37,7 @@ export interface WebExtApi {
     sendMessage<T = unknown>(tabId: number, message: unknown): Promise<T>;
   };
   runtime: {
+    getURL(path: string): string;
     sendMessage<T = unknown>(message: unknown): Promise<T>;
     onMessage: {
       addListener(

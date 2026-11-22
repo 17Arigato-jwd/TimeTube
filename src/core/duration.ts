@@ -8,7 +8,6 @@ export function parseDurationText(raw: string | null | undefined): number | null
   const cleaned = raw.trim();
   if (!cleaned) return null;
 
-  // Standard colon-separated format: MM:SS or HH:MM:SS (exact or embedded)
   const colonMatch = cleaned.match(/\b(\d{1,2}:)?(\d{1,2}):(\d{2})\b/);
   if (colonMatch) {
     const parts = colonMatch[0].split(':').map((p) => Number.parseInt(p, 10));
@@ -21,7 +20,6 @@ export function parseDurationText(raw: string | null | undefined): number | null
     }
   }
 
-  // Spoken ARIA label fallback: e.g., "1 hour, 5 minutes, 20 seconds" (excluding "2 hours ago")
   const hoursMatch = cleaned.match(/(\d+)\s+hours?\b(?!\s+ago\b)/i);
   const minsMatch = cleaned.match(/(\d+)\s+minutes?\b(?!\s+ago\b)/i);
   const secsMatch = cleaned.match(/(\d+)\s+seconds?\b(?!\s+ago\b)/i);
@@ -48,6 +46,27 @@ export function formatDurationBadge(totalSeconds: number): string {
     return `${hours}:${pad(minutes)}:${pad(seconds)}`;
   }
   return `${minutes}:${pad(seconds)}`;
+}
+
+/**
+ * Formats remaining break time as a compact approximation for TimeTube badges:
+ * - >= 1 hour: nearest 0.5hr (e.g. "1hr", "1.5hr", "2hr")
+ * - 1..59 min: whole minutes (e.g. "30m", "2m")
+ * - < 1 min: exact seconds (e.g. "53s", "42s", "3s")
+ */
+export function formatApproxRemaining(remainingMs: number): string {
+  const totalSec = Math.max(0, Math.ceil(remainingMs / 1000));
+  if (totalSec === 0) return '0s';
+  if (totalSec < 60) return `${totalSec}s`;
+
+  const totalMin = totalSec / 60;
+  if (totalMin < 59.5) {
+    return `${Math.max(1, Math.round(totalMin))}m`;
+  }
+
+  const halfHours = Math.round((totalSec / 3600) * 2) / 2;
+  const formatted = Number.isInteger(halfHours) ? String(halfHours) : halfHours.toFixed(1);
+  return `${formatted}hr`;
 }
 
 /** Extracts lengthSeconds from YouTube Shorts/Watch HTML payload. */

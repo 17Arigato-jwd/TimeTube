@@ -1,4 +1,4 @@
-import { extractLengthSecondsFromHtml } from '../core/duration';
+import { extractLengthSecondsFromHtml, formatApproxRemaining } from '../core/duration';
 import {
   computeRemainingMs,
   resolveBudgetBounds,
@@ -12,8 +12,8 @@ import { webext } from '../shared/webext';
 
 const STATE_KEY = 'ytTimeFitSessionState';
 const SHORT_CACHE_KEY = 'ytTimeFitShortDurationCache';
-const EXPIRY_ALARM = 'yt-timefit-session-expiry';
-const BADGE_TICK_ALARM = 'yt-timefit-badge-tick';
+const EXPIRY_ALARM = 'yt-timetube-session-expiry';
+const BADGE_TICK_ALARM = 'yt-timetube-badge-tick';
 const SHORT_CACHE_TTL_MS = 7 * 24 * 60 * 60_000;
 
 interface CachedDuration {
@@ -57,27 +57,28 @@ async function syncAlarmsAndBadge(state: PersistedSessionState): Promise<void> {
   const remainingMs = computeRemainingMs(state, nowMs);
 
   if (state.status === 'paused') {
-    await setBadge('II', '#d97706');
+    const label = remainingMs !== null ? formatApproxRemaining(remainingMs) : 'II';
+    await setBadge(label, '#d97706');
     return;
   }
 
   if (state.status === 'active' && state.spec) {
     if (state.spec.mode === 'maxLength') {
-      await setBadge(`${state.spec.maxMinutes}m`, '#2563eb');
+      await setBadge(formatApproxRemaining(state.spec.maxMinutes * 60_000), '#2563eb');
       return;
     }
 
     if (state.endsAtMs !== null && remainingMs !== null && remainingMs > 0) {
       webext.alarms.create(EXPIRY_ALARM, { when: state.endsAtMs });
       webext.alarms.create(BADGE_TICK_ALARM, { periodInMinutes: 1 });
-      const minsLeft = Math.max(1, Math.ceil(remainingMs / 60_000));
-      await setBadge(`${minsLeft}m`, minsLeft <= 5 ? '#dc2626' : '#0f766e');
+      const label = formatApproxRemaining(remainingMs);
+      await setBadge(label, remainingMs <= 5 * 60_000 ? '#ff0033' : '#0f766e');
       return;
     }
   }
 
   if (state.status === 'expired') {
-    await setBadge('0m', '#dc2626');
+    await setBadge('0s', '#ff0033');
   } else {
     await setBadge('', '#0f766e');
   }
@@ -173,6 +174,7 @@ async function handleMessage(msg: RuntimeMessage): Promise<unknown> {
         await saveState(expired);
         return expired;
       }
+      await syncAlarmsAndBadge(state);
       return state;
     }
 

@@ -9,10 +9,6 @@ import {
   VideoCandidate,
 } from './types';
 
-/**
- * Resolves a BudgetSpec into canonical epoch timestamps.
- * For `until`, parses local 24h "HH:MM" and rolls over to tomorrow if that time has already passed.
- */
 export function resolveBudgetBounds(
   spec: BudgetSpec,
   nowMs: number,
@@ -50,7 +46,6 @@ export function resolveBudgetBounds(
   return { startedAtMs: nowMs, endsAtMs: target.getTime() };
 }
 
-/** Computes remaining milliseconds for timed sessions (frozen when paused). */
 export function computeRemainingMs(
   state: Pick<PersistedSessionState, 'status' | 'spec' | 'endsAtMs' | 'pausedRemainingMs'>,
   nowMs: number,
@@ -67,10 +62,6 @@ export function computeRemainingMs(
   return Math.max(0, state.endsAtMs - nowMs);
 }
 
-/**
- * Computes the effective maximum video duration (in seconds) that a user can click *now*
- * and still finish before the time limit ends.
- */
 export function computeMaxAllowedSeconds(
   state: Pick<PersistedSessionState, 'status' | 'spec' | 'endsAtMs' | 'pausedRemainingMs' | 'policy'>,
   nowMs: number,
@@ -88,11 +79,6 @@ export function computeMaxAllowedSeconds(
   return Math.max(0, remainingSec - Math.max(0, state.policy.bufferSeconds));
 }
 
-/**
- * Computes whether a playing/resumed/direct-link video will run past the remaining break time,
- * the exact extra seconds needed to finish it, the exact dynamic playback speed (max 2.0x),
- * and the progress-bar cutoff percentage for the red early-cutoff indicator.
- */
 export function computePlaybackOverrun(
   videoCurrentSeconds: number,
   videoDurationSeconds: number,
@@ -139,9 +125,6 @@ export function computePlaybackOverrun(
   };
 }
 
-/**
- * Computes the graduated Shorts escalation stage for a timed session.
- */
 export function computeShortsStage(
   state: Pick<
     PersistedSessionState,
@@ -215,6 +198,10 @@ export function evaluateVideoCandidate(
   return 'allow';
 }
 
+/**
+ * Builds a UI-ready SessionSnapshot.
+ * Autoplay only blocks playback when explicitly observed as 'enabled' on a playing video.
+ */
 export function buildSessionSnapshot(
   state: PersistedSessionState,
   nowMs: number,
@@ -237,8 +224,6 @@ export function buildSessionSnapshot(
   let derivedStatus: SessionSnapshot['status'];
   if (snoozed) {
     derivedStatus = 'snoozed';
-  } else if (state.autoplayOnboarding === 'unseen') {
-    derivedStatus = 'needs_autoplay_setup';
   } else if (autoplayObserved === 'enabled') {
     derivedStatus = 'needs_autoplay_setup';
   } else if (isTimedExpired) {

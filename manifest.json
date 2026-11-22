@@ -1,16 +1,22 @@
 {
   "manifest_version": 3,
-  "name": "TimeFit for YouTube",
-  "version": "1.0.0",
+  "name": "TimeTube",
+  "version": "1.1.0",
   "description": "Only shows YouTube videos you have time to finish before your break ends, with live sidebar pruning and smart Shorts guardrails.",
   "browser_specific_settings": {
     "gecko": {
-      "id": "timefit-youtube@example.org",
+      "id": "timetube@vchs.com",
       "strict_min_version": "121.0"
     },
     "gecko_android": {
       "strict_min_version": "121.0"
     }
+  },
+  "icons": {
+    "16": "assets/icon-16.png",
+    "32": "assets/icon-32.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
   },
   "permissions": ["storage", "alarms"],
   "host_permissions": [
@@ -23,8 +29,14 @@
     "type": "module"
   },
   "action": {
-    "default_title": "TimeFit for YouTube",
-    "default_popup": "popup/popup.html"
+    "default_title": "TimeTube",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "assets/icon-16.png",
+      "32": "assets/icon-32.png",
+      "48": "assets/icon-48.png",
+      "128": "assets/icon-128.png"
+    }
   },
   "content_scripts": [
     {
@@ -35,6 +47,19 @@
       "js": ["dist/content.js"],
       "css": ["src/content/styles.css"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/topbar-empty.svg",
+        "assets/topbar-badge.svg",
+        "assets/logo-main.svg"
+      ],
+      "matches": [
+        "https://www.youtube.com/*",
+        "https://m.youtube.com/*"
+      ]
     }
   ]
 }
