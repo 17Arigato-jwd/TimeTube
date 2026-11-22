@@ -193,8 +193,8 @@
       policy: { ...effectiveState.policy }
     };
   }
-  function buildStandardWatchUrl(videoId, currentTimeSeconds) {
-    const base = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+  function buildStandardWatchUrl(videoId, currentTimeSeconds, origin = "https://www.youtube.com") {
+    const base = `${origin}/watch?v=${encodeURIComponent(videoId)}`;
     if (currentTimeSeconds && currentTimeSeconds >= 1) {
       return `${base}&t=${Math.floor(currentTimeSeconds)}s`;
     }
@@ -263,7 +263,7 @@
     }
     return candidates[0] ?? null;
   }
-  function closePopover() {
+  function closeTopbarPopover() {
     popoverOpen = false;
     const pop = document.getElementById("yt-timetube-popover");
     if (pop) pop.classList.add("yt-tt-hidden");
@@ -382,7 +382,7 @@
     }
     pop.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
-        closePopover();
+        closeTopbarPopover();
       }
       e.stopPropagation();
     });
@@ -530,7 +530,7 @@
           if (!popoverOpen) return;
           const wrapEl = document.getElementById("yt-timetube-topbar-wrap");
           if (wrapEl && !wrapEl.contains(event.target)) {
-            closePopover();
+            closeTopbarPopover();
           }
         });
       }
@@ -615,6 +615,13 @@
     if (hideNav) hideNav.checked = state.policy.hideShortsNavButton;
     if (showDur) showDur.checked = state.policy.showShortDurationBadges;
   }
+  function tickTopbarUI(state) {
+    updateTopbarBadge(state);
+    const pop = document.getElementById("yt-timetube-popover");
+    if (pop && popoverOpen) {
+      updatePopoverUI(pop, state);
+    }
+  }
 
   // src/content/index.ts
   var STATE_KEY = "ytTimeFitSessionState";
@@ -663,6 +670,7 @@
   var mediaListenersAttached = false;
   var inputBlockerAttached = false;
   var ignorePauseUntilMs = 0;
+  var ignoreOverrunUntilMs = 0;
   var timerPausedByVideo = false;
   var pausePromptTimer = null;
   var seekOverrunTimer = null;
@@ -714,6 +722,12 @@
   function isVideoActivelyPlaying() {
     const video = document.querySelector("video.html5-main-video");
     return Boolean(video && !video.paused && !video.ended && video.readyState >= 2);
+  }
+  function getActivePlayerVideo() {
+    if (isShortsPage()) {
+      return document.querySelector("ytd-reel-video-renderer[is-active] video") ?? document.querySelector("#shorts-player video") ?? document.querySelector("video.html5-main-video, video");
+    }
+    return document.querySelector("#movie_player video.html5-main-video") ?? document.querySelector("video.html5-main-video, video");
   }
   function formatHumanDuration(totalSeconds) {
     const safe = Math.max(1, Math.round(totalSeconds));
@@ -811,6 +825,7 @@
     if (activeModalId === id && document.getElementById("yt-timefit-modal-root")) {
       return;
     }
+    closeTopbarPopover();
     removeModal();
     activeModalId = id;
     document.documentElement.classList.add("yt-timefit-modal-open");
@@ -907,6 +922,7 @@
   function evaluateMediaOverrun(video, trigger) {
     if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
     if (activeModalId !== null) return;
+    if (Date.now() < ignoreOverrunUntilMs) return;
     const videoId = getActiveMediaId();
     if (!videoId) return;
     const snapshot = getCurrentSnapshot();
@@ -943,6 +959,7 @@
         variant: "primary",
         onClick: async () => {
           const fresh = computeLatest();
+          ignoreOverrunUntilMs = Date.now() + 2e3;
           removeModal();
           acceptedEarlyCutoffVideoId = null;
           clearEarlyCutoffBar();
@@ -961,6 +978,7 @@
         onClick: () => {
           const fresh = computeLatest();
           if (fresh.suggestedSpeed === null) return;
+          ignoreOverrunUntilMs = Date.now() + 2e3;
           removeModal();
           acceptedEarlyCutoffVideoId = null;
           clearEarlyCutoffBar();
@@ -1443,17 +1461,23 @@
     banner.textContent = `Time's almost up \u2014 wrap up this video. Your break ends at ${endLabel}.`;
     sidebar.prepend(banner);
   }
-  function convertCurrentShortToStandardPlayer() {
+  function convertCurrentShortToStandardPlayer(preserveTime = true) {
     const shortId = extractShortIdFromHref(window.location.pathname);
     if (!shortId) return;
-    const video = document.querySelector("video");
-    const currentTime = video?.currentTime ?? 0;
-    window.location.replace(buildStandardWatchUrl(shortId, currentTime));
+    const video = preserveTime ? getActivePlayerVideo() : null;
+    const currentTime = video && Number.isFinite(video.currentTime) ? video.currentTime : 0;
+    const targetUrl = buildStandardWatchUrl(shortId, currentTime, window.location.origin);
+    if (window.location.href !== targetUrl) {
+      window.location.replace(targetUrl);
+    }
   }
   function evaluateShortsPageEscalation(snapshot) {
     if (snoozedUntilReloadOrPopup || !isShortsPage()) return;
     const shortId = extractShortIdFromHref(window.location.pathname);
     if (!shortId) return;
+    if (activeModalId === "shorts_lock") {
+      return;
+    }
     if (snapshot.policy.shortsMode === "redirectToWatch" || snapshot.shortsLockedForSession) {
       convertCurrentShortToStandardPlayer();
       return;
@@ -1461,8 +1485,6 @@
     if (snapshot.status !== "active") return;
     if (snapshot.shortsStage === "locked_to_watch") {
       pauseActiveVideo(true);
-      webext.runtime.sendMessage({ type: "LOCK_SHORTS_FOR_SESSION" }).catch(() => void 0);
-      persistedState = { ...persistedState, shortsLockedForSession: true };
       showModal(
         "shorts_lock",
         `Less than ${snapshot.policy.shortsLockCutoffMinutes} minutes left in your break`,
@@ -1471,8 +1493,10 @@
           {
             label: "Switch to Standard Player",
             variant: "primary",
-            onClick: () => {
+            onClick: async () => {
               removeModal();
+              persistedState = { ...persistedState, shortsLockedForSession: true };
+              await webext.runtime.sendMessage({ type: "LOCK_SHORTS_FOR_SESSION" }).catch(() => void 0);
               convertCurrentShortToStandardPlayer();
             }
           }
@@ -1504,6 +1528,7 @@
                 type: "ACK_SHORTS_PROMPT",
                 stage: "nudge_25"
               });
+              resumeVideo(getActivePlayerVideo());
             }
           }
         ]
@@ -1534,6 +1559,7 @@
                 type: "ACK_SHORTS_PROMPT",
                 stage: "nudge_50"
               });
+              resumeVideo(getActivePlayerVideo());
             }
           }
         ]
@@ -1568,6 +1594,15 @@
       clearEarlyCutoffBar();
       return;
     }
+    if (!persistedState.policy.showShortDurationBadges) {
+      document.querySelectorAll(".yt-timefit-short-duration").forEach((el) => el.remove());
+    }
+    const hideEndscreen = snapshot.status === "active" && snapshot.remainingMs !== null && snapshot.remainingMs > 0 && snapshot.remainingMs <= 3e4;
+    if (hideEndscreen) {
+      document.documentElement.setAttribute("data-ytb-hide-endscreen", "true");
+    } else {
+      document.documentElement.removeAttribute("data-ytb-hide-endscreen");
+    }
     evaluateShortsPageEscalation(snapshot);
     if (snapshot.status !== "active" && snapshot.status !== "paused") {
       restoreAllCards();
@@ -1575,7 +1610,7 @@
       return;
     }
     if (isWatchPage() || isShortsPage()) {
-      const video = document.querySelector("video.html5-main-video, video");
+      const video = getActivePlayerVideo();
       updateEarlyCutoffBar(video, snapshot);
     } else {
       clearEarlyCutoffBar();
@@ -1629,7 +1664,8 @@
         if (!shortId) return;
         event.preventDefault();
         event.stopPropagation();
-        window.location.assign(buildStandardWatchUrl(shortId));
+        event.stopImmediatePropagation();
+        window.location.assign(buildStandardWatchUrl(shortId, 0, window.location.origin));
       },
       true
     );
@@ -1652,9 +1688,27 @@
     attachShortClickInterceptor();
     attachDocumentMediaListeners();
     runFullSweep();
-    window.addEventListener("yt-navigate-finish", () => {
+    const maybeRedirectShortImmediately = () => {
+      if (snoozedUntilReloadOrPopup || expiredScreenRendered || !isShortsPage()) return;
+      const snap = getCurrentSnapshot();
+      if (snap.policy.shortsMode === "redirectToWatch" || snap.shortsLockedForSession) {
+        convertCurrentShortToStandardPlayer(false);
+      }
+    };
+    window.addEventListener("yt-navigate-start", () => {
+      window.setTimeout(maybeRedirectShortImmediately, 0);
+    });
+    window.addEventListener("popstate", () => {
+      window.setTimeout(maybeRedirectShortImmediately, 0);
+    });
+    window.addEventListener("yt-navigate-finish", async () => {
       consecutiveScrollNudges = 0;
       lastDirectCheckedVideoId = null;
+      maybeRedirectShortImmediately();
+      if (timerPausedByVideo || persistedState.status === "paused") {
+        timerPausedByVideo = false;
+        persistedState = await webext.runtime.sendMessage({ type: "RESUME_TIMER" }).catch(() => persistedState);
+      }
       window.setTimeout(() => {
         checkAutoplayWhilePlaying();
         runFullSweep();
@@ -1674,7 +1728,16 @@
     }, SWEEP_INTERVAL_MS);
     topbarTickInterval = window.setInterval(() => {
       if (document.hidden || expiredScreenRendered) return;
-      updateTopbarBadge(persistedState);
+      tickTopbarUI(persistedState);
+      const snap = getCurrentSnapshot();
+      if (snap.status === "active" && snap.remainingMs !== null && snap.remainingMs > 0) {
+        if (snap.remainingMs <= 3e4) {
+          document.documentElement.setAttribute("data-ytb-hide-endscreen", "true");
+        }
+        if (snap.remainingMs <= 6e4) {
+          webext.runtime.sendMessage({ type: "SYNC_BADGE" }).catch(() => void 0);
+        }
+      }
     }, 1e3);
     webext.storage.onChanged.addListener((changes, area) => {
       if (area !== "local" || !changes[STATE_KEY]?.newValue) return;

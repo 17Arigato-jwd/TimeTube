@@ -339,6 +339,11 @@ async function handleMessage(msg: RuntimeMessage): Promise<unknown> {
       return next;
     }
 
+    case 'SYNC_BADGE': {
+      await syncAlarmsAndBadge(state);
+      return { ok: true };
+    }
+
     case 'WAKE_FROM_POPUP': {
       await wakeAllYouTubeTabs();
       return state;

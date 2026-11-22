@@ -80,11 +80,8 @@ export interface PlaybackOverrunAnalysis {
   videoRemainingSeconds: number;
   breakRemainingSeconds: number;
   extraSecondsNeeded: number;
-  /** Dynamic speed needed (e.g. 1.3, 1.57), capped at 2.0; null if > 2.0x or not needed. */
   suggestedSpeed: number | null;
-  /** Video timestamp (in seconds) where timer will cut off at current playbackRate. */
   cutoffVideoSeconds: number;
-  /** Percentage along the video progress bar (0..100) where the red cutoff overlay begins. */
   cutoffPercent: number;
 }
 
@@ -128,7 +125,6 @@ export const INITIAL_PERSISTED_STATE: PersistedSessionState = {
   policy: { ...DEFAULT_POLICY },
 };
 
-// Cross-context message contracts
 export type RuntimeMessage =
   | { type: 'GET_STATE' }
   | { type: 'START_SESSION'; spec: BudgetSpec; policyOverrides?: Partial<FilterPolicy> }
@@ -142,4 +138,5 @@ export type RuntimeMessage =
   | { type: 'ACK_SHORTS_PROMPT'; stage: 'nudge_50' | 'nudge_25' }
   | { type: 'LOCK_SHORTS_FOR_SESSION' }
   | { type: 'WAKE_FROM_POPUP' }
+  | { type: 'SYNC_BADGE' }
   | { type: 'FETCH_SHORT_DURATION'; videoId: string };

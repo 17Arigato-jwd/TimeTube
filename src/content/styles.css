@@ -680,3 +680,13 @@ html:not([dark]) {
   line-height: 22px;
   color: var(--tt-text-secondary);
 }
+
+/* Hide in-player recommendations & endscreen cards when < 30 seconds remain */
+html[data-ytb-hide-endscreen="true"] .ytp-ce-element,
+html[data-ytb-hide-endscreen="true"] .ytp-endscreen-content,
+html[data-ytb-hide-endscreen="true"] .html5-endscreen,
+html[data-ytb-hide-endscreen="true"] .ytp-pause-overlay,
+html[data-ytb-hide-endscreen="true"] .ytp-suggestion-set,
+html[data-ytb-hide-endscreen="true"] .ytp-cards-teaser {
+  display: none !important;
+}

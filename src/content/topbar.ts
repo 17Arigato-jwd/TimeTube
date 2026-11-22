@@ -41,7 +41,7 @@ function findCreateButtonSlot(container: HTMLElement): HTMLElement | null {
   return candidates[0] ?? null;
 }
 
-function closePopover(): void {
+export function closeTopbarPopover(): void {
   popoverOpen = false;
   const pop = document.getElementById('yt-timetube-popover');
   if (pop) pop.classList.add('yt-tt-hidden');
@@ -164,7 +164,7 @@ function buildPopover(onStateChange: (next: PersistedSessionState) => void): HTM
 
   pop.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      closePopover();
+      closeTopbarPopover();
     }
     e.stopPropagation();
   });
@@ -336,7 +336,7 @@ export function syncTopbarControl(
         if (!popoverOpen) return;
         const wrapEl = document.getElementById('yt-timetube-topbar-wrap');
         if (wrapEl && !wrapEl.contains(event.target as Node)) {
-          closePopover();
+          closeTopbarPopover();
         }
       });
     }
@@ -437,4 +437,12 @@ function updatePopoverUI(pop: HTMLElement, state: PersistedSessionState): void {
   if (exceedSelect) exceedSelect.value = state.policy.exceedAction;
   if (hideNav) hideNav.checked = state.policy.hideShortsNavButton;
   if (showDur) showDur.checked = state.policy.showShortDurationBadges;
+}
+
+export function tickTopbarUI(state: PersistedSessionState): void {
+  updateTopbarBadge(state);
+  const pop = document.getElementById('yt-timetube-popover');
+  if (pop && popoverOpen) {
+    updatePopoverUI(pop, state);
+  }
 }

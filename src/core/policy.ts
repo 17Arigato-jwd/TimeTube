@@ -198,10 +198,6 @@ export function evaluateVideoCandidate(
   return 'allow';
 }
 
-/**
- * Builds a UI-ready SessionSnapshot.
- * Autoplay only blocks playback when explicitly observed as 'enabled' on a playing video.
- */
 export function buildSessionSnapshot(
   state: PersistedSessionState,
   nowMs: number,
@@ -256,8 +252,12 @@ export function buildSessionSnapshot(
   };
 }
 
-export function buildStandardWatchUrl(videoId: string, currentTimeSeconds?: number): string {
-  const base = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+export function buildStandardWatchUrl(
+  videoId: string,
+  currentTimeSeconds?: number,
+  origin: string = 'https://www.youtube.com',
+): string {
+  const base = `${origin}/watch?v=${encodeURIComponent(videoId)}`;
   if (currentTimeSeconds && currentTimeSeconds >= 1) {
     return `${base}&t=${Math.floor(currentTimeSeconds)}s`;
   }

@@ -17,7 +17,7 @@ import {
   VideoCandidate,
 } from '../core/types';
 import { webext } from '../shared/webext';
-import { syncTopbarControl, updateTopbarBadge } from './topbar';
+import { closeTopbarPopover, syncTopbarControl, tickTopbarUI } from './topbar';
 
 const STATE_KEY = 'ytTimeFitSessionState';
 const AUTOPLAY_HELP_URL = 'https://support.google.com/youtube/answer/6327615';
@@ -71,6 +71,7 @@ let expiredScreenRendered = false;
 let mediaListenersAttached = false;
 let inputBlockerAttached = false;
 let ignorePauseUntilMs = 0;
+let ignoreOverrunUntilMs = 0;
 let timerPausedByVideo = false;
 let pausePromptTimer: number | null = null;
 let seekOverrunTimer: number | null = null;
@@ -131,6 +132,21 @@ function isMainPlayerVideo(el: EventTarget | null): el is HTMLVideoElement {
 function isVideoActivelyPlaying(): boolean {
   const video = document.querySelector<HTMLVideoElement>('video.html5-main-video');
   return Boolean(video && !video.paused && !video.ended && video.readyState >= 2);
+}
+
+
+function getActivePlayerVideo(): HTMLVideoElement | null {
+  if (isShortsPage()) {
+    return (
+      document.querySelector<HTMLVideoElement>('ytd-reel-video-renderer[is-active] video') ??
+      document.querySelector<HTMLVideoElement>('#shorts-player video') ??
+      document.querySelector<HTMLVideoElement>('video.html5-main-video, video')
+    );
+  }
+  return (
+    document.querySelector<HTMLVideoElement>('#movie_player video.html5-main-video') ??
+    document.querySelector<HTMLVideoElement>('video.html5-main-video, video')
+  );
 }
 
 function formatHumanDuration(totalSeconds: number): string {
@@ -263,6 +279,7 @@ function showModal(
   if (activeModalId === id && document.getElementById('yt-timefit-modal-root')) {
     return;
   }
+  closeTopbarPopover();
   removeModal();
   activeModalId = id;
   document.documentElement.classList.add('yt-timefit-modal-open');
@@ -392,6 +409,7 @@ function evaluateMediaOverrun(
 ): void {
   if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
   if (activeModalId !== null) return;
+  if (Date.now() < ignoreOverrunUntilMs) return;
   const videoId = getActiveMediaId();
   if (!videoId) return;
 
@@ -440,6 +458,7 @@ function evaluateMediaOverrun(
       variant: 'primary',
       onClick: async () => {
         const fresh = computeLatest();
+        ignoreOverrunUntilMs = Date.now() + 2_000;
         removeModal();
         acceptedEarlyCutoffVideoId = null;
         clearEarlyCutoffBar();
@@ -458,6 +477,7 @@ function evaluateMediaOverrun(
       onClick: () => {
         const fresh = computeLatest();
         if (fresh.suggestedSpeed === null) return;
+        ignoreOverrunUntilMs = Date.now() + 2_000;
         removeModal();
         acceptedEarlyCutoffVideoId = null;
         clearEarlyCutoffBar();
@@ -1031,12 +1051,15 @@ function updateFinishLineBanner(snapshot: SessionSnapshot, visibleSidebarCount: 
   sidebar.prepend(banner);
 }
 
-function convertCurrentShortToStandardPlayer(): void {
+function convertCurrentShortToStandardPlayer(preserveTime = true): void {
   const shortId = extractShortIdFromHref(window.location.pathname);
   if (!shortId) return;
-  const video = document.querySelector<HTMLVideoElement>('video');
-  const currentTime = video?.currentTime ?? 0;
-  window.location.replace(buildStandardWatchUrl(shortId, currentTime));
+  const video = preserveTime ? getActivePlayerVideo() : null;
+  const currentTime = video && Number.isFinite(video.currentTime) ? video.currentTime : 0;
+  const targetUrl = buildStandardWatchUrl(shortId, currentTime, window.location.origin);
+  if (window.location.href !== targetUrl) {
+    window.location.replace(targetUrl);
+  }
 }
 
 function evaluateShortsPageEscalation(snapshot: SessionSnapshot): void {
@@ -1044,6 +1067,10 @@ function evaluateShortsPageEscalation(snapshot: SessionSnapshot): void {
 
   const shortId = extractShortIdFromHref(window.location.pathname);
   if (!shortId) return;
+
+  if (activeModalId === 'shorts_lock') {
+    return;
+  }
 
   if (snapshot.policy.shortsMode === 'redirectToWatch' || snapshot.shortsLockedForSession) {
     convertCurrentShortToStandardPlayer();
@@ -1054,8 +1081,6 @@ function evaluateShortsPageEscalation(snapshot: SessionSnapshot): void {
 
   if (snapshot.shortsStage === 'locked_to_watch') {
     pauseActiveVideo(true);
-    webext.runtime.sendMessage({ type: 'LOCK_SHORTS_FOR_SESSION' }).catch(() => undefined);
-    persistedState = { ...persistedState, shortsLockedForSession: true };
     showModal(
       'shorts_lock',
       `Less than ${snapshot.policy.shortsLockCutoffMinutes} minutes left in your break`,
@@ -1064,8 +1089,10 @@ function evaluateShortsPageEscalation(snapshot: SessionSnapshot): void {
         {
           label: 'Switch to Standard Player',
           variant: 'primary',
-          onClick: () => {
+          onClick: async () => {
             removeModal();
+            persistedState = { ...persistedState, shortsLockedForSession: true };
+            await webext.runtime.sendMessage({ type: 'LOCK_SHORTS_FOR_SESSION' }).catch(() => undefined);
             convertCurrentShortToStandardPlayer();
           },
         },
@@ -1098,6 +1125,7 @@ function evaluateShortsPageEscalation(snapshot: SessionSnapshot): void {
               type: 'ACK_SHORTS_PROMPT',
               stage: 'nudge_25',
             });
+            resumeVideo(getActivePlayerVideo());
           },
         },
       ],
@@ -1129,6 +1157,7 @@ function evaluateShortsPageEscalation(snapshot: SessionSnapshot): void {
               type: 'ACK_SHORTS_PROMPT',
               stage: 'nudge_50',
             });
+            resumeVideo(getActivePlayerVideo());
           },
         },
       ],
@@ -1169,6 +1198,23 @@ function runFullSweep(): void {
     return;
   }
 
+  // Remove existing Short duration pills immediately when user toggles them off
+  if (!persistedState.policy.showShortDurationBadges) {
+    document.querySelectorAll('.yt-timefit-short-duration').forEach((el) => el.remove());
+  }
+
+  // Hide in-player video recommendations & endscreen cards when < 30 seconds remain
+  const hideEndscreen =
+    snapshot.status === 'active' &&
+    snapshot.remainingMs !== null &&
+    snapshot.remainingMs > 0 &&
+    snapshot.remainingMs <= 30_000;
+  if (hideEndscreen) {
+    document.documentElement.setAttribute('data-ytb-hide-endscreen', 'true');
+  } else {
+    document.documentElement.removeAttribute('data-ytb-hide-endscreen');
+  }
+
   evaluateShortsPageEscalation(snapshot);
 
   if (snapshot.status !== 'active' && snapshot.status !== 'paused') {
@@ -1178,7 +1224,7 @@ function runFullSweep(): void {
   }
 
   if (isWatchPage() || isShortsPage()) {
-    const video = document.querySelector<HTMLVideoElement>('video.html5-main-video, video');
+    const video = getActivePlayerVideo();
     updateEarlyCutoffBar(video, snapshot);
   } else {
     clearEarlyCutoffBar();
@@ -1242,7 +1288,8 @@ function attachShortClickInterceptor(): void {
 
       event.preventDefault();
       event.stopPropagation();
-      window.location.assign(buildStandardWatchUrl(shortId));
+      event.stopImmediatePropagation();
+      window.location.assign(buildStandardWatchUrl(shortId, 0, window.location.origin));
     },
     true,
   );
@@ -1269,9 +1316,33 @@ async function mountYouTubeFilterHost(): Promise<void> {
   attachDocumentMediaListeners();
   runFullSweep();
 
-  window.addEventListener('yt-navigate-finish', () => {
+  const maybeRedirectShortImmediately = () => {
+    if (snoozedUntilReloadOrPopup || expiredScreenRendered || !isShortsPage()) return;
+    const snap = getCurrentSnapshot();
+    if (snap.policy.shortsMode === 'redirectToWatch' || snap.shortsLockedForSession) {
+      convertCurrentShortToStandardPlayer(false);
+    }
+  };
+
+  window.addEventListener('yt-navigate-start', () => {
+    window.setTimeout(maybeRedirectShortImmediately, 0);
+  });
+
+  window.addEventListener('popstate', () => {
+    window.setTimeout(maybeRedirectShortImmediately, 0);
+  });
+
+  window.addEventListener('yt-navigate-finish', async () => {
     consecutiveScrollNudges = 0;
     lastDirectCheckedVideoId = null;
+    maybeRedirectShortImmediately();
+    // Auto-resume countdown if user paused a video + timer and then navigated away to browse
+    if (timerPausedByVideo || persistedState.status === 'paused') {
+      timerPausedByVideo = false;
+      persistedState = await webext.runtime
+        .sendMessage<PersistedSessionState>({ type: 'RESUME_TIMER' })
+        .catch(() => persistedState);
+    }
     window.setTimeout(() => {
       checkAutoplayWhilePlaying();
       runFullSweep();
@@ -1294,7 +1365,16 @@ async function mountYouTubeFilterHost(): Promise<void> {
 
   topbarTickInterval = window.setInterval(() => {
     if (document.hidden || expiredScreenRendered) return;
-    updateTopbarBadge(persistedState);
+    tickTopbarUI(persistedState);
+    const snap = getCurrentSnapshot();
+    if (snap.status === 'active' && snap.remainingMs !== null && snap.remainingMs > 0) {
+      if (snap.remainingMs <= 30_000) {
+        document.documentElement.setAttribute('data-ytb-hide-endscreen', 'true');
+      }
+      if (snap.remainingMs <= 60_000) {
+        webext.runtime.sendMessage({ type: 'SYNC_BADGE' }).catch(() => undefined);
+      }
+    }
   }, 1000);
 
   webext.storage.onChanged.addListener((changes, area) => {
