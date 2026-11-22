@@ -446,3 +446,17 @@ export function tickTopbarUI(state: PersistedSessionState): void {
     updatePopoverUI(pop, state);
   }
 }
+
+export function openTopbarPopover(): void {
+  const pop = document.getElementById('yt-timetube-popover');
+  if (!pop) return;
+  popoverOpen = true;
+  pop.classList.remove('yt-tt-hidden');
+  if (!userEditedUntilTime) {
+    const u = pop.querySelector<HTMLInputElement>('#yt-tt-until-time');
+    if (u) u.value = getDefaultEndTime();
+  }
+  if (lastState) {
+    updatePopoverUI(pop, lastState);
+  }
+}

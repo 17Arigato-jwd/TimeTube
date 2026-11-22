@@ -525,14 +525,28 @@ html:not([dark]) {
 }
 
 .yt-timefit-finish-banner {
-  margin: 0 0 12px 0;
-  padding: 12px 16px;
+  margin: 0 0 16px 0;
+  padding: 16px;
   border-radius: 12px;
   background: var(--tt-surface-subtle);
+  border: 1px solid var(--tt-divider);
   color: var(--tt-text-primary);
   font-family: "Roboto", "Arial", sans-serif;
   font-size: 13px;
   line-height: 19px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.yt-timefit-finish-banner strong {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--tt-text-primary);
+}
+
+.yt-timefit-finish-banner span {
+  color: var(--tt-text-secondary);
 }
 
 /* Native YouTube tp-yt-paper-dialog look */
@@ -681,12 +695,14 @@ html:not([dark]) {
   color: var(--tt-text-secondary);
 }
 
-/* Hide in-player recommendations & endscreen cards when < 30 seconds remain */
+/* Hide in-player AND right-sidebar Watch recommendations when < 30 seconds remain */
 html[data-ytb-hide-endscreen="true"] .ytp-ce-element,
 html[data-ytb-hide-endscreen="true"] .ytp-endscreen-content,
 html[data-ytb-hide-endscreen="true"] .html5-endscreen,
 html[data-ytb-hide-endscreen="true"] .ytp-pause-overlay,
 html[data-ytb-hide-endscreen="true"] .ytp-suggestion-set,
-html[data-ytb-hide-endscreen="true"] .ytp-cards-teaser {
+html[data-ytb-hide-endscreen="true"] .ytp-cards-teaser,
+html[data-ytb-hide-endscreen="true"] #related,
+html[data-ytb-hide-endscreen="true"] ytd-watch-next-secondary-results-renderer {
   display: none !important;
 }

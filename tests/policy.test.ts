@@ -16,6 +16,7 @@ import {
   computeShortsStage,
   evaluateVideoCandidate,
   resolveBudgetBounds,
+  shouldAutoResetExpiredSession,
 } from '../src/core/policy';
 import {
   DEFAULT_POLICY,
@@ -168,4 +169,15 @@ test('getDefaultEndTime rounds strictly up to the next 15-minute mark', () => {
   assert.equal(getDefaultEndTime(new Date(2026, 10, 22, 3, 15, 0).getTime()), '03:30');
   assert.equal(getDefaultEndTime(new Date(2026, 10, 22, 14, 14, 59).getTime()), '14:15');
   assert.equal(getDefaultEndTime(new Date(2026, 10, 22, 23, 50, 0).getTime()), '00:00');
+});
+
+test('shouldAutoResetExpiredSession resets only after all YouTube tabs stay closed >= 10s', () => {
+  const closedAt = Date.parse('2026-11-22T10:00:00Z');
+  const expiredOpen = makeActiveSession({ status: 'expired', allYouTubeClosedAtMs: null });
+  assert.equal(shouldAutoResetExpiredSession(expiredOpen, closedAt + 20_000), false);
+
+  const expiredClosed = makeActiveSession({ status: 'expired', allYouTubeClosedAtMs: closedAt });
+  assert.equal(shouldAutoResetExpiredSession(expiredClosed, closedAt + 5_000), false);
+  assert.equal(shouldAutoResetExpiredSession(expiredClosed, closedAt + 10_000), true);
+  assert.equal(shouldAutoResetExpiredSession(expiredClosed, closedAt + 60_000), true);
 });

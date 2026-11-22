@@ -35,6 +35,12 @@ export interface WebExtApi {
   tabs: {
     query(queryInfo: { url?: string | string[] }): Promise<Array<{ id?: number; url?: string }>>;
     sendMessage<T = unknown>(tabId: number, message: unknown): Promise<T>;
+    onRemoved?: {
+      addListener(cb: (tabId: number) => void): void;
+    };
+    onUpdated?: {
+      addListener(cb: (tabId: number, changeInfo: { url?: string; status?: string }) => void): void;
+    };
   };
   runtime: {
     getURL(path: string): string;

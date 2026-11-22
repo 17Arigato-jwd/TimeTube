@@ -17,7 +17,7 @@ import {
   VideoCandidate,
 } from '../core/types';
 import { webext } from '../shared/webext';
-import { closeTopbarPopover, syncTopbarControl, tickTopbarUI } from './topbar';
+import { closeTopbarPopover, openTopbarPopover, syncTopbarControl, tickTopbarUI } from './topbar';
 
 const STATE_KEY = 'ytTimeFitSessionState';
 const AUTOPLAY_HELP_URL = 'https://support.google.com/youtube/answer/6327615';
@@ -1023,32 +1023,47 @@ function nudgeInfiniteScrollIfSparse(visibleRegularVideos: number): void {
 
 function updateFinishLineBanner(snapshot: SessionSnapshot, visibleSidebarCount: number): void {
   const existing = document.getElementById('yt-timefit-finish-banner');
-  const shouldShow =
+  const isUnder30s =
     isWatchPage() &&
     snapshot.status === 'active' &&
     snapshot.remainingMs !== null &&
     snapshot.remainingMs > 0 &&
+    snapshot.remainingMs <= 30_000;
+
+  const isEmptyFinishLine =
+    isWatchPage() &&
+    snapshot.status === 'active' &&
+    snapshot.remainingMs !== null &&
+    snapshot.remainingMs > 30_000 &&
     snapshot.remainingMs <= 120_000 &&
     visibleSidebarCount === 0;
 
-  if (!shouldShow) {
+  if (!isUnder30s && !isEmptyFinishLine) {
     if (existing) existing.remove();
     return;
   }
 
-  if (existing) return;
-
-  const sidebar = document.querySelector<HTMLElement>('#related #items, #secondary-inner');
+  const sidebar = document.querySelector<HTMLElement>('#secondary-inner, #related #items');
   if (!sidebar) return;
 
-  const banner = document.createElement('div');
+  const banner = existing ?? document.createElement('div');
   banner.id = 'yt-timefit-finish-banner';
   banner.className = 'yt-timefit-finish-banner';
-  const endLabel = snapshot.endsAtMs
-    ? new Date(snapshot.endsAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : 'soon';
-  banner.textContent = `Time's almost up — wrap up this video. Your break ends at ${endLabel}.`;
-  sidebar.prepend(banner);
+
+  if (isUnder30s) {
+    banner.innerHTML =
+      '<strong>Recommendations paused</strong><span>Less than 30 seconds left on your TimeTube timer, so new videos are hidden while you wrap up.</span>';
+  } else {
+    const endLabel = snapshot.endsAtMs
+      ? new Date(snapshot.endsAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : 'soon';
+    banner.innerHTML =
+      `<strong>Time's almost up</strong><span>No sidebar videos fit your remaining break. Your timer ends at ${endLabel}.</span>`;
+  }
+
+  if (!existing) {
+    sidebar.prepend(banner);
+  }
 }
 
 function convertCurrentShortToStandardPlayer(preserveTime = true): void {
@@ -1068,10 +1083,6 @@ function evaluateShortsPageEscalation(snapshot: SessionSnapshot): void {
   const shortId = extractShortIdFromHref(window.location.pathname);
   if (!shortId) return;
 
-  if (activeModalId === 'shorts_lock') {
-    return;
-  }
-
   if (snapshot.policy.shortsMode === 'redirectToWatch' || snapshot.shortsLockedForSession) {
     convertCurrentShortToStandardPlayer();
     return;
@@ -1080,24 +1091,9 @@ function evaluateShortsPageEscalation(snapshot: SessionSnapshot): void {
   if (snapshot.status !== 'active') return;
 
   if (snapshot.shortsStage === 'locked_to_watch') {
-    pauseActiveVideo(true);
-    showModal(
-      'shorts_lock',
-      `Less than ${snapshot.policy.shortsLockCutoffMinutes} minutes left in your break`,
-      'Switching this video to the standard YouTube player now. Shorts are locked for the rest of your break so you can finish cleanly.',
-      [
-        {
-          label: 'Switch to Standard Player',
-          variant: 'primary',
-          onClick: async () => {
-            removeModal();
-            persistedState = { ...persistedState, shortsLockedForSession: true };
-            await webext.runtime.sendMessage({ type: 'LOCK_SHORTS_FOR_SESSION' }).catch(() => undefined);
-            convertCurrentShortToStandardPlayer();
-          },
-        },
-      ],
-    );
+    persistedState = { ...persistedState, shortsLockedForSession: true };
+    webext.runtime.sendMessage({ type: 'LOCK_SHORTS_FOR_SESSION' }).catch(() => undefined);
+    convertCurrentShortToStandardPlayer();
     return;
   }
 
@@ -1165,6 +1161,62 @@ function evaluateShortsPageEscalation(snapshot: SessionSnapshot): void {
   }
 }
 
+
+function maybeShowLastExpiredNotice(): void {
+  if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
+  if (activeModalId !== null) return;
+  if (persistedState.status !== 'idle' || !persistedState.lastExpiredNotice) return;
+
+  const { endedAtMs, lastSpec } = persistedState.lastExpiredNotice;
+  const endedLabel = new Date(endedAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const summary =
+    lastSpec.mode === 'countdown'
+      ? `Your ${lastSpec.durationMinutes} min timer ended at ${endedLabel}.`
+      : `Your last YouTube break ended at ${endedLabel}.`;
+
+  const actions: Array<{ label: string; variant: 'primary' | 'secondary' | 'ghost'; onClick: () => void }> = [];
+
+  if (lastSpec.mode === 'countdown') {
+    actions.push({
+      label: `Start ${lastSpec.durationMinutes} min again`,
+      variant: 'primary',
+      onClick: async () => {
+        removeModal();
+        persistedState = await webext.runtime.sendMessage<PersistedSessionState>({
+          type: 'START_SESSION',
+          spec: lastSpec,
+        });
+        runFullSweep();
+      },
+    });
+  }
+
+  actions.push({
+    label: 'Set a new timer',
+    variant: lastSpec.mode === 'countdown' ? 'secondary' : 'primary',
+    onClick: async () => {
+      removeModal();
+      persistedState = await webext.runtime.sendMessage<PersistedSessionState>({
+        type: 'DISMISS_EXPIRED_NOTICE',
+      });
+      openTopbarPopover();
+    },
+  });
+
+  actions.push({
+    label: 'Browse without timer',
+    variant: 'ghost',
+    onClick: async () => {
+      removeModal();
+      persistedState = await webext.runtime.sendMessage<PersistedSessionState>({
+        type: 'DISMISS_EXPIRED_NOTICE',
+      });
+    },
+  });
+
+  showModal('last_expired_notice', 'Your last break ended', summary, actions);
+}
+
 function runFullSweep(): void {
   const snapshot = getCurrentSnapshot();
 
@@ -1220,6 +1272,7 @@ function runFullSweep(): void {
   if (snapshot.status !== 'active' && snapshot.status !== 'paused') {
     restoreAllCards();
     clearEarlyCutoffBar();
+    maybeShowLastExpiredNotice();
     return;
   }
 
@@ -1370,6 +1423,7 @@ async function mountYouTubeFilterHost(): Promise<void> {
     if (snap.status === 'active' && snap.remainingMs !== null && snap.remainingMs > 0) {
       if (snap.remainingMs <= 30_000) {
         document.documentElement.setAttribute('data-ytb-hide-endscreen', 'true');
+        updateFinishLineBanner(snap, 0);
       }
       if (snap.remainingMs <= 60_000) {
         webext.runtime.sendMessage({ type: 'SYNC_BADGE' }).catch(() => undefined);

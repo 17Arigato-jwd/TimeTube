@@ -263,3 +263,14 @@ export function buildStandardWatchUrl(
   }
   return base;
 }
+
+export function shouldAutoResetExpiredSession(
+  state: Pick<PersistedSessionState, 'status' | 'allYouTubeClosedAtMs'>,
+  nowMs: number,
+  cooldownMs: number = 10_000,
+): boolean {
+  if (state.status !== 'expired' || state.allYouTubeClosedAtMs === null) {
+    return false;
+  }
+  return nowMs - state.allYouTubeClosedAtMs >= cooldownMs;
+}

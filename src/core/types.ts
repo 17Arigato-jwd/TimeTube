@@ -47,6 +47,8 @@ export interface PersistedSessionState {
   endsAtMs: number | null;
   pausedAtMs: number | null;
   pausedRemainingMs: number | null;
+  allYouTubeClosedAtMs: number | null;
+  lastExpiredNotice: { endedAtMs: number; lastSpec: BudgetSpec } | null;
   autoplayOnboarding: AutoplayOnboardingState;
   shortsLockedForSession: boolean;
   acknowledgedPrompts: {
@@ -116,6 +118,8 @@ export const INITIAL_PERSISTED_STATE: PersistedSessionState = {
   endsAtMs: null,
   pausedAtMs: null,
   pausedRemainingMs: null,
+  allYouTubeClosedAtMs: null,
+  lastExpiredNotice: null,
   autoplayOnboarding: 'unseen',
   shortsLockedForSession: false,
   acknowledgedPrompts: {
@@ -139,4 +143,5 @@ export type RuntimeMessage =
   | { type: 'LOCK_SHORTS_FOR_SESSION' }
   | { type: 'WAKE_FROM_POPUP' }
   | { type: 'SYNC_BADGE' }
+  | { type: 'DISMISS_EXPIRED_NOTICE' }
   | { type: 'FETCH_SHORT_DURATION'; videoId: string };

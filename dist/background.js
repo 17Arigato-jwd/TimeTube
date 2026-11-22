@@ -52,6 +52,12 @@ function computeRemainingMs(state, nowMs) {
   }
   return Math.max(0, state.endsAtMs - nowMs);
 }
+function shouldAutoResetExpiredSession(state, nowMs, cooldownMs = 1e4) {
+  if (state.status !== "expired" || state.allYouTubeClosedAtMs === null) {
+    return false;
+  }
+  return nowMs - state.allYouTubeClosedAtMs >= cooldownMs;
+}
 
 // src/core/types.ts
 var DEFAULT_POLICY = {
@@ -72,6 +78,8 @@ var INITIAL_PERSISTED_STATE = {
   endsAtMs: null,
   pausedAtMs: null,
   pausedRemainingMs: null,
+  allYouTubeClosedAtMs: null,
+  lastExpiredNotice: null,
   autoplayOnboarding: "unseen",
   shortsLockedForSession: false,
   acknowledgedPrompts: {
@@ -91,6 +99,8 @@ var SHORT_CACHE_KEY = "ytTimeFitShortDurationCache";
 var EXPIRY_ALARM = "yt-timetube-session-expiry";
 var BADGE_TICK_ALARM = "yt-timetube-badge-tick";
 var SHORT_CACHE_TTL_MS = 7 * 24 * 60 * 6e4;
+var EXPIRED_AUTO_RESET_MS = 1e4;
+var expiredResetTimer = null;
 var inflightShortFetches = /* @__PURE__ */ new Map();
 async function loadState() {
   const result = await webext.storage.local.get(STATE_KEY);
@@ -193,6 +203,80 @@ async function resolveShortDuration(videoId) {
   inflightShortFetches.set(videoId, task);
   return task;
 }
+async function finalizeExpiredAutoReset(state, nowMs) {
+  const notice = state.spec ? { endedAtMs: state.endsAtMs ?? nowMs, lastSpec: state.spec } : state.lastExpiredNotice;
+  const next = {
+    ...state,
+    id: null,
+    status: "idle",
+    spec: null,
+    startedAtMs: null,
+    endsAtMs: null,
+    pausedAtMs: null,
+    pausedRemainingMs: null,
+    allYouTubeClosedAtMs: null,
+    shortsLockedForSession: false,
+    acknowledgedPrompts: { nudge_50: false, nudge_25: false },
+    lastExpiredNotice: notice
+  };
+  await saveState(next);
+  return next;
+}
+async function checkYouTubeTabsForExpiredReset() {
+  const state = await loadState();
+  if (state.status !== "expired") {
+    if (expiredResetTimer !== null) {
+      clearTimeout(expiredResetTimer);
+      expiredResetTimer = null;
+    }
+    return;
+  }
+  let openYouTubeTabs = 0;
+  try {
+    const tabs = await webext.tabs.query({
+      url: ["https://www.youtube.com/*", "https://m.youtube.com/*"]
+    });
+    openYouTubeTabs = tabs.length;
+  } catch {
+    return;
+  }
+  const nowMs = Date.now();
+  if (openYouTubeTabs === 0) {
+    if (state.allYouTubeClosedAtMs === null) {
+      const stamped = { ...state, allYouTubeClosedAtMs: nowMs };
+      await saveState(stamped);
+    }
+    if (expiredResetTimer !== null) clearTimeout(expiredResetTimer);
+    const closedAt = state.allYouTubeClosedAtMs ?? nowMs;
+    const waitMs = Math.max(0, EXPIRED_AUTO_RESET_MS - (nowMs - closedAt));
+    expiredResetTimer = setTimeout(async () => {
+      expiredResetTimer = null;
+      const latest = await loadState();
+      if (shouldAutoResetExpiredSession(latest, Date.now(), EXPIRED_AUTO_RESET_MS)) {
+        try {
+          const tabsNow = await webext.tabs.query({
+            url: ["https://www.youtube.com/*", "https://m.youtube.com/*"]
+          });
+          if (tabsNow.length === 0) {
+            await finalizeExpiredAutoReset(latest, Date.now());
+          }
+        } catch {
+          await finalizeExpiredAutoReset(latest, Date.now());
+        }
+      }
+    }, waitMs + 50);
+  } else {
+    if (expiredResetTimer !== null) {
+      clearTimeout(expiredResetTimer);
+      expiredResetTimer = null;
+    }
+    if (shouldAutoResetExpiredSession(state, nowMs, EXPIRED_AUTO_RESET_MS)) {
+      await finalizeExpiredAutoReset(state, nowMs);
+    } else if (state.allYouTubeClosedAtMs !== null) {
+      await saveState({ ...state, allYouTubeClosedAtMs: null });
+    }
+  }
+}
 async function wakeAllYouTubeTabs() {
   try {
     const tabs = await webext.tabs.query({
@@ -209,8 +293,16 @@ async function handleMessage(msg) {
   const nowMs = Date.now();
   switch (msg.type) {
     case "GET_STATE": {
+      if (shouldAutoResetExpiredSession(state, nowMs, EXPIRED_AUTO_RESET_MS)) {
+        return finalizeExpiredAutoReset(state, nowMs);
+      }
+      if (state.status === "expired" && state.allYouTubeClosedAtMs !== null) {
+        const kept = { ...state, allYouTubeClosedAtMs: null };
+        await saveState(kept);
+        return kept;
+      }
       if (state.status === "active" && state.spec && state.spec.mode !== "maxLength" && state.endsAtMs !== null && state.endsAtMs <= nowMs) {
-        const expired = { ...state, status: "expired" };
+        const expired = { ...state, status: "expired", allYouTubeClosedAtMs: null };
         await saveState(expired);
         return expired;
       }
@@ -228,6 +320,8 @@ async function handleMessage(msg) {
         endsAtMs: bounds.endsAtMs,
         pausedAtMs: null,
         pausedRemainingMs: null,
+        allYouTubeClosedAtMs: null,
+        lastExpiredNotice: null,
         shortsLockedForSession: false,
         acknowledgedPrompts: { nudge_50: false, nudge_25: false },
         policy: { ...state.policy, ...msg.policyOverrides ?? {} }
@@ -326,6 +420,8 @@ async function handleMessage(msg) {
         endsAtMs: null,
         pausedAtMs: null,
         pausedRemainingMs: null,
+        allYouTubeClosedAtMs: null,
+        lastExpiredNotice: null,
         shortsLockedForSession: false,
         acknowledgedPrompts: { nudge_50: false, nudge_25: false }
       };
@@ -368,6 +464,11 @@ async function handleMessage(msg) {
       await saveState(next);
       return next;
     }
+    case "DISMISS_EXPIRED_NOTICE": {
+      const next = { ...state, lastExpiredNotice: null };
+      await saveState(next);
+      return next;
+    }
     case "SYNC_BADGE": {
       await syncAlarmsAndBadge(state);
       return { ok: true };
@@ -400,8 +501,23 @@ function bootBackgroundSessionRuntime() {
       await syncAlarmsAndBadge(state);
     }
   });
+  webext.tabs.onRemoved?.addListener(() => {
+    checkYouTubeTabsForExpiredReset().catch(() => void 0);
+  });
+  webext.tabs.onUpdated?.addListener((_tabId, changeInfo) => {
+    if (changeInfo.url || changeInfo.status === "complete") {
+      checkYouTubeTabsForExpiredReset().catch(() => void 0);
+    }
+  });
   const rehydrate = () => {
-    loadState().then((s) => syncAlarmsAndBadge(s)).catch(() => void 0);
+    loadState().then(async (s) => {
+      if (shouldAutoResetExpiredSession(s, Date.now(), EXPIRED_AUTO_RESET_MS)) {
+        await finalizeExpiredAutoReset(s, Date.now());
+      } else {
+        await syncAlarmsAndBadge(s);
+        await checkYouTubeTabsForExpiredReset();
+      }
+    }).catch(() => void 0);
   };
   webext.runtime.onInstalled?.addListener(rehydrate);
   webext.runtime.onStartup?.addListener(rehydrate);
