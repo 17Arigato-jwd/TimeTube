@@ -268,86 +268,102 @@
     pop.innerHTML = `
     <div class="yt-tt-pop-header">
       <div class="yt-tt-pop-brand">
-        <img class="yt-tt-pop-logo" alt="TimeTube" />
+        <img class="yt-tt-pop-logo" alt="" width="20" height="20" />
         <strong>TimeTube</strong>
       </div>
-      <span id="yt-tt-status-pill" class="yt-tt-pill yt-tt-pill-idle">Idle</span>
+      <span id="yt-tt-status-pill" class="yt-tt-status yt-tt-status-idle">Off</span>
     </div>
 
-    <div id="yt-tt-active-banner" class="yt-tt-card yt-tt-active-card yt-tt-hidden">
-      <div class="yt-tt-active-time">
-        <span class="yt-tt-label">Remaining</span>
-        <strong id="yt-tt-remaining">--:--</strong>
+    <div id="yt-tt-active-banner" class="yt-tt-active-strip yt-tt-hidden">
+      <div class="yt-tt-active-meta">
+        <span class="yt-tt-caption">Time remaining</span>
+        <strong id="yt-tt-remaining" class="yt-tt-clock">--:--</strong>
       </div>
       <div class="yt-tt-active-actions">
-        <button id="yt-tt-extend" type="button" class="yt-tt-btn yt-tt-btn-secondary">+5 min</button>
-        <button id="yt-tt-stop" type="button" class="yt-tt-btn yt-tt-btn-danger">Stop</button>
+        <button id="yt-tt-extend" type="button" class="yt-tt-pill-btn yt-tt-pill-tonal">+5 min</button>
+        <button id="yt-tt-stop" type="button" class="yt-tt-pill-btn yt-tt-pill-danger">Stop</button>
       </div>
     </div>
 
-    <div class="yt-tt-card">
-      <div class="yt-tt-tabs">
+    <div class="yt-tt-section">
+      <div class="yt-tt-tabs" role="tablist">
         <button type="button" class="yt-tt-tab active" data-mode="countdown">Timer</button>
-        <button type="button" class="yt-tt-tab" data-mode="until">End Time</button>
-        <button type="button" class="yt-tt-tab" data-mode="maxLength">Max Length</button>
+        <button type="button" class="yt-tt-tab" data-mode="until">End time</button>
+        <button type="button" class="yt-tt-tab" data-mode="maxLength">Max length</button>
       </div>
 
-      <div id="yt-tt-panel-countdown" class="yt-tt-panel">
-        <div class="yt-tt-presets">
-          <button type="button" class="yt-tt-preset" data-mins="15">15m</button>
-          <button type="button" class="yt-tt-preset" data-mins="25">25m</button>
-          <button type="button" class="yt-tt-preset" data-mins="45">45m</button>
+      <div id="yt-tt-panel-countdown" class="yt-tt-mode-panel">
+        <div class="yt-tt-chips">
+          <button type="button" class="yt-tt-chip" data-mins="15">15 min</button>
+          <button type="button" class="yt-tt-chip active" data-mins="25">25 min</button>
+          <button type="button" class="yt-tt-chip" data-mins="45">45 min</button>
         </div>
-        <label class="yt-tt-row">
+        <label class="yt-tt-field-row">
           <span>Custom minutes</span>
-          <input id="yt-tt-countdown-mins" type="number" min="1" max="360" value="25" />
+          <input id="yt-tt-countdown-mins" type="number" min="1" max="360" value="25" class="yt-tt-input" />
         </label>
       </div>
 
-      <div id="yt-tt-panel-until" class="yt-tt-panel yt-tt-hidden">
-        <label class="yt-tt-row">
-          <span>Break ends at</span>
-          <input id="yt-tt-until-time" type="time" value="17:00" />
+      <div id="yt-tt-panel-until" class="yt-tt-mode-panel yt-tt-hidden">
+        <label class="yt-tt-field-row">
+          <span>Stop watching at</span>
+          <input id="yt-tt-until-time" type="time" value="17:00" class="yt-tt-input" />
         </label>
       </div>
 
-      <div id="yt-tt-panel-maxLength" class="yt-tt-panel yt-tt-hidden">
-        <label class="yt-tt-row">
+      <div id="yt-tt-panel-maxLength" class="yt-tt-mode-panel yt-tt-hidden">
+        <label class="yt-tt-field-row">
           <span>Max video length (min)</span>
-          <input id="yt-tt-max-mins" type="number" min="1" max="240" value="15" />
+          <input id="yt-tt-max-mins" type="number" min="1" max="240" value="15" class="yt-tt-input" />
         </label>
       </div>
 
-      <button id="yt-tt-start" type="button" class="yt-tt-btn yt-tt-btn-primary yt-tt-full">Start Session</button>
+      <button id="yt-tt-start" type="button" class="yt-tt-pill-btn yt-tt-pill-primary yt-tt-full">Start session</button>
     </div>
 
-    <div class="yt-tt-card yt-tt-settings">
-      <h3>Guardrails</h3>
-      <label class="yt-tt-row">
-        <span>Disable Shorts (standard player)</span>
-        <input id="yt-tt-disable-shorts" type="checkbox" />
+    <div class="yt-tt-divider" role="separator"></div>
+
+    <div class="yt-tt-section yt-tt-settings">
+      <span class="yt-tt-section-label">Playback &amp; Shorts</span>
+
+      <label class="yt-tt-setting-row">
+        <span>Open Shorts in standard player</span>
+        <span class="yt-tt-switch">
+          <input id="yt-tt-disable-shorts" type="checkbox" />
+          <span class="yt-tt-switch-track"><span class="yt-tt-switch-knob"></span></span>
+        </span>
       </label>
-      <label id="yt-tt-cutoff-row" class="yt-tt-row">
-        <span>Force leave Shorts before end</span>
-        <select id="yt-tt-shorts-cutoff">
+
+      <label id="yt-tt-cutoff-row" class="yt-tt-setting-row">
+        <span>Leave Shorts before end</span>
+        <select id="yt-tt-shorts-cutoff" class="yt-tt-select">
           <option value="5">5 min left</option>
           <option value="10">10 min left</option>
         </select>
       </label>
-      <label class="yt-tt-row">
-        <span>Unfinishable videos</span>
-        <select id="yt-tt-exceed-action">
-          <option value="hide">Hide completely</option>
-          <option value="dim">Dim thumbnail</option>
+
+      <label class="yt-tt-setting-row">
+        <span>Videos over limit</span>
+        <select id="yt-tt-exceed-action" class="yt-tt-select">
+          <option value="hide">Hide</option>
+          <option value="dim">Dim</option>
         </select>
       </label>
-      <label class="yt-tt-row">
-        <span>Hide Shorts sidebar/nav button</span>
-        <input id="yt-tt-hide-nav" type="checkbox" checked />
+
+      <label class="yt-tt-setting-row">
+        <span>Hide Shorts sidebar tab</span>
+        <span class="yt-tt-switch">
+          <input id="yt-tt-hide-nav" type="checkbox" checked />
+          <span class="yt-tt-switch-track"><span class="yt-tt-switch-knob"></span></span>
+        </span>
       </label>
-      <label class="yt-tt-row">
-        <span>Show duration badge on Shorts</span>
-        <input id="yt-tt-show-durations" type="checkbox" checked />
+
+      <label class="yt-tt-setting-row">
+        <span>Show duration on Shorts</span>
+        <span class="yt-tt-switch">
+          <input id="yt-tt-show-durations" type="checkbox" checked />
+          <span class="yt-tt-switch-track"><span class="yt-tt-switch-knob"></span></span>
+        </span>
       </label>
     </div>
   `;
@@ -374,14 +390,24 @@
         pop.querySelector("#yt-tt-panel-maxLength")?.classList.toggle("yt-tt-hidden", mode !== "maxLength");
       });
     });
-    pop.querySelectorAll(".yt-tt-preset").forEach((btn) => {
+    const countdownInput = pop.querySelector("#yt-tt-countdown-mins");
+    const syncChips = () => {
+      const val = countdownInput?.value.trim() ?? "";
+      pop.querySelectorAll(".yt-tt-chip").forEach((c) => {
+        c.classList.toggle("active", c.dataset.mins === val);
+      });
+    };
+    pop.querySelectorAll(".yt-tt-chip").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const input = pop.querySelector("#yt-tt-countdown-mins");
-        if (input && btn.dataset.mins) input.value = btn.dataset.mins;
+        if (countdownInput && btn.dataset.mins) {
+          countdownInput.value = btn.dataset.mins;
+          syncChips();
+        }
       });
     });
+    countdownInput?.addEventListener("input", syncChips);
     pop.querySelector("#yt-tt-start")?.addEventListener("click", async () => {
-      const countdownVal = Number(pop.querySelector("#yt-tt-countdown-mins")?.value || 25);
+      const countdownVal = Number(countdownInput?.value || 25);
       const untilVal = pop.querySelector("#yt-tt-until-time")?.value || "17:00";
       const maxVal = Number(pop.querySelector("#yt-tt-max-mins")?.value || 15);
       let spec;
@@ -509,7 +535,7 @@
       badge.textContent = "";
       return;
     }
-    icon.src = webext.runtime.getURL("assets/topbar-badge.svg");
+    icon.src = webext.runtime.getURL("assets/topbar-empty.svg");
     let label = "";
     if (state.status === "expired") {
       label = "0s";
@@ -534,8 +560,8 @@
     const remainingMs = computeRemainingMs(state, Date.now());
     if (pill && activeBanner && remainingEl && extendBtn) {
       if (state.status === "active" || state.status === "paused") {
-        pill.textContent = state.status === "paused" ? "Paused" : state.spec?.mode === "maxLength" ? "Max Length" : "Active";
-        pill.className = state.status === "paused" ? "yt-tt-pill yt-tt-pill-paused" : "yt-tt-pill yt-tt-pill-active";
+        pill.textContent = state.status === "paused" ? "Paused" : state.spec?.mode === "maxLength" ? "Max length" : "Active";
+        pill.className = state.status === "paused" ? "yt-tt-status yt-tt-status-paused" : "yt-tt-status yt-tt-status-active";
         activeBanner.classList.remove("yt-tt-hidden");
         if (state.spec?.mode === "maxLength") {
           remainingEl.textContent = `\u2264 ${state.spec.maxMinutes}m`;
@@ -545,14 +571,14 @@
           extendBtn.classList.remove("yt-tt-hidden");
         }
       } else if (state.status === "expired") {
-        pill.textContent = "Break Ended";
-        pill.className = "yt-tt-pill yt-tt-pill-expired";
+        pill.textContent = "Time up";
+        pill.className = "yt-tt-status yt-tt-status-expired";
         activeBanner.classList.remove("yt-tt-hidden");
         remainingEl.textContent = "0:00";
         extendBtn.classList.remove("yt-tt-hidden");
       } else {
-        pill.textContent = "Idle";
-        pill.className = "yt-tt-pill yt-tt-pill-idle";
+        pill.textContent = "Off";
+        pill.className = "yt-tt-status yt-tt-status-idle";
         activeBanner.classList.add("yt-tt-hidden");
       }
     }
@@ -617,7 +643,6 @@
   var mediaListenersAttached = false;
   var inputBlockerAttached = false;
   var ignorePauseUntilMs = 0;
-  var choseKeepTimerGoing = false;
   var timerPausedByVideo = false;
   var pausePromptTimer = null;
   var seekOverrunTimer = null;
@@ -762,7 +787,7 @@
     document.documentElement.classList.remove("yt-timefit-modal-open");
     activeModalId = null;
   }
-  function showModal(id, title, body, actions) {
+  function showModal(id, title, body, actions, onTick) {
     if (activeModalId === id && document.getElementById("yt-timefit-modal-root")) {
       return;
     }
@@ -784,6 +809,22 @@
     const timerPill = document.createElement("span");
     timerPill.className = "yt-timefit-modal-timer";
     headerRow.appendChild(timerPill);
+    const text = document.createElement("p");
+    text.textContent = body;
+    const btnRow = document.createElement("div");
+    btnRow.className = "yt-timefit-actions";
+    let firstButton = null;
+    const buttonMap = /* @__PURE__ */ new Map();
+    for (const act of actions) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = act.label;
+      btn.className = `yt-timefit-btn yt-timefit-btn-${act.variant}`;
+      btn.addEventListener("click", act.onClick);
+      if (act.id) buttonMap.set(act.id, btn);
+      if (!firstButton) firstButton = btn;
+      btnRow.appendChild(btn);
+    }
     const refreshModalTimer = () => {
       const snap = getCurrentSnapshot();
       if (snap.status === "expired") {
@@ -796,23 +837,10 @@
       } else {
         timerPill.style.display = "none";
       }
+      onTick?.({ bodyEl: text, buttons: buttonMap });
     };
     refreshModalTimer();
     modalTimerInterval = window.setInterval(refreshModalTimer, 500);
-    const text = document.createElement("p");
-    text.textContent = body;
-    const btnRow = document.createElement("div");
-    btnRow.className = "yt-timefit-actions";
-    let firstButton = null;
-    for (const act of actions) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = act.label;
-      btn.className = `yt-timefit-btn yt-timefit-btn-${act.variant}`;
-      btn.addEventListener("click", act.onClick);
-      if (!firstButton) firstButton = btn;
-      btnRow.appendChild(btn);
-    }
     card.appendChild(headerRow);
     card.appendChild(text);
     card.appendChild(btnRow);
@@ -877,54 +905,84 @@
       }
       return;
     }
-    if ((trigger === "direct_link" || trigger === "seek_back" || trigger === "rate_change") && acceptedEarlyCutoffVideoId === videoId) {
+    if (acceptedEarlyCutoffVideoId === videoId) {
       updateEarlyCutoffBar(video, snapshot);
       return;
     }
     pauseActiveVideo(true);
+    const computeLatest = () => {
+      const snap = getCurrentSnapshot();
+      const rem = snap.remainingMs ?? 0;
+      return computePlaybackOverrun(video.currentTime, video.duration, video.playbackRate, rem);
+    };
+    const formatOverrunBody = (a) => `There is ${formatHumanDuration(a.videoRemainingSeconds)} left in this video, but only ${formatHumanDuration(a.breakRemainingSeconds)} left on your timer.` + (a.suggestedSpeed === null ? " Even at 2\xD7 speed, it will run past your break." : "");
     const actions = [
       {
+        id: "add_time",
         label: `Add +${formatHumanDuration(analysis.extraSecondsNeeded)} to timer`,
         variant: "primary",
         onClick: async () => {
+          const fresh = computeLatest();
           removeModal();
           acceptedEarlyCutoffVideoId = null;
           clearEarlyCutoffBar();
           persistedState = await webext.runtime.sendMessage({
             type: "EXTEND_SESSION_SECONDS",
-            additionalSeconds: analysis.extraSecondsNeeded + 5
+            additionalSeconds: Math.max(1, fresh.extraSecondsNeeded) + 5
           });
           runFullSweep();
           resumeVideo(video);
         }
-      }
-    ];
-    if (analysis.suggestedSpeed !== null) {
-      const targetSpeed = analysis.suggestedSpeed;
-      actions.push({
-        label: `Speed up to ${formatSpeed(targetSpeed)}`,
+      },
+      {
+        id: "speed_up",
+        label: analysis.suggestedSpeed !== null ? `Speed up to ${formatSpeed(analysis.suggestedSpeed)}` : "",
         variant: "secondary",
         onClick: () => {
+          const fresh = computeLatest();
+          if (fresh.suggestedSpeed === null) return;
           removeModal();
           acceptedEarlyCutoffVideoId = null;
           clearEarlyCutoffBar();
-          video.playbackRate = targetSpeed;
+          video.playbackRate = fresh.suggestedSpeed;
           resumeVideo(video);
         }
-      });
-    }
-    actions.push({
-      label: "Accept early cutoff",
-      variant: "ghost",
-      onClick: () => {
-        removeModal();
-        acceptedEarlyCutoffVideoId = videoId;
-        updateEarlyCutoffBar(video, getCurrentSnapshot());
-        resumeVideo(video);
+      },
+      {
+        id: "accept_cutoff",
+        label: "Accept early cutoff",
+        variant: "ghost",
+        onClick: () => {
+          removeModal();
+          acceptedEarlyCutoffVideoId = videoId;
+          updateEarlyCutoffBar(video, getCurrentSnapshot());
+          resumeVideo(video);
+        }
       }
-    });
-    const body = `There is ${formatHumanDuration(analysis.videoRemainingSeconds)} left in this video, but only ${formatHumanDuration(analysis.breakRemainingSeconds)} left on your timer.` + (analysis.suggestedSpeed === null ? " Even at 2\xD7 speed, it will run past your break." : "");
-    showModal(`overrun_${videoId}_${trigger}`, "This video won't finish before time is up", body, actions);
+    ];
+    showModal(
+      `overrun_${videoId}_${trigger}`,
+      "This video won't finish before time is up",
+      formatOverrunBody(analysis),
+      actions,
+      ({ bodyEl, buttons }) => {
+        const fresh = computeLatest();
+        bodyEl.textContent = formatOverrunBody(fresh);
+        const addBtn = buttons.get("add_time");
+        if (addBtn) {
+          addBtn.textContent = `Add +${formatHumanDuration(fresh.extraSecondsNeeded)} to timer`;
+        }
+        const speedBtn = buttons.get("speed_up");
+        if (speedBtn) {
+          if (fresh.suggestedSpeed !== null) {
+            speedBtn.style.display = "";
+            speedBtn.textContent = `Speed up to ${formatSpeed(fresh.suggestedSpeed)}`;
+          } else {
+            speedBtn.style.display = "none";
+          }
+        }
+      }
+    );
   }
   function attachDocumentMediaListeners() {
     if (mediaListenersAttached) return;
@@ -946,10 +1004,6 @@
           if (snapshot.status !== "active" || snapshot.remainingMs === null) {
             return;
           }
-          if (snapshot.spec?.mode === "until") {
-            choseKeepTimerGoing = true;
-            return;
-          }
           if (snapshot.spec?.mode !== "countdown") {
             return;
           }
@@ -962,7 +1016,6 @@
               onClick: async () => {
                 removeModal();
                 timerPausedByVideo = true;
-                choseKeepTimerGoing = false;
                 persistedState = await webext.runtime.sendMessage({
                   type: "PAUSE_TIMER"
                 });
@@ -975,7 +1028,6 @@
               onClick: () => {
                 removeModal();
                 timerPausedByVideo = false;
-                choseKeepTimerGoing = true;
               }
             }
           ]);
@@ -1006,18 +1058,12 @@
             type: "RESUME_TIMER"
           });
           runFullSweep();
-          return;
-        }
-        if (choseKeepTimerGoing) {
-          choseKeepTimerGoing = false;
-          evaluateMediaOverrun(video, "resume");
-          return;
         }
         const mediaId = getActiveMediaId();
-        if (mediaId && mediaId !== lastDirectCheckedVideoId) {
+        if (mediaId) {
           lastDirectCheckedVideoId = mediaId;
-          evaluateMediaOverrun(video, "direct_link");
         }
+        evaluateMediaOverrun(video, "resume");
       },
       true
     );
@@ -1588,7 +1634,7 @@
     runFullSweep();
     window.addEventListener("yt-navigate-finish", () => {
       consecutiveScrollNudges = 0;
-      choseKeepTimerGoing = false;
+      lastDirectCheckedVideoId = null;
       window.setTimeout(() => {
         checkAutoplayWhilePlaying();
         runFullSweep();

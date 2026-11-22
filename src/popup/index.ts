@@ -32,12 +32,19 @@ function formatMs(ms: number): string {
 
 function setModeTab(mode: BudgetSpec['mode']): void {
   selectedMode = mode;
-  document.querySelectorAll<HTMLButtonElement>('.tab').forEach((btn) => {
+  document.querySelectorAll<HTMLButtonElement>('.tt-tab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.mode === mode);
   });
   document.getElementById('panel-countdown')?.classList.toggle('hidden', mode !== 'countdown');
   document.getElementById('panel-until')?.classList.toggle('hidden', mode !== 'until');
   document.getElementById('panel-maxLength')?.classList.toggle('hidden', mode !== 'maxLength');
+}
+
+function syncActivePresetChip(): void {
+  const val = countdownInput.value.trim();
+  document.querySelectorAll<HTMLButtonElement>('.tt-chip').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.mins === val);
+  });
 }
 
 function renderState(state: PersistedSessionState): void {
@@ -49,9 +56,10 @@ function renderState(state: PersistedSessionState): void {
       state.status === 'paused'
         ? 'Paused'
         : state.spec?.mode === 'maxLength'
-          ? 'Max Length'
+          ? 'Max length'
           : 'Active';
-    statusPill.className = state.status === 'paused' ? 'pill pill-paused' : 'pill pill-active';
+    statusPill.className =
+      state.status === 'paused' ? 'tt-status tt-status-paused' : 'tt-status tt-status-active';
     activeBanner.classList.remove('hidden');
 
     if (state.spec?.mode === 'maxLength') {
@@ -62,14 +70,14 @@ function renderState(state: PersistedSessionState): void {
       extendBtn.classList.remove('hidden');
     }
   } else if (state.status === 'expired') {
-    statusPill.textContent = 'Break Ended';
-    statusPill.className = 'pill pill-expired';
+    statusPill.textContent = 'Time up';
+    statusPill.className = 'tt-status tt-status-expired';
     activeBanner.classList.remove('hidden');
     remainingDisplay.textContent = '0:00';
     extendBtn.classList.remove('hidden');
   } else {
-    statusPill.textContent = 'Idle';
-    statusPill.className = 'pill pill-idle';
+    statusPill.textContent = 'Off';
+    statusPill.className = 'tt-status tt-status-idle';
     activeBanner.classList.add('hidden');
   }
 
@@ -100,18 +108,23 @@ async function initPopup(): Promise<void> {
   const state = await webext.runtime.sendMessage<PersistedSessionState>({ type: 'GET_STATE' });
   renderState(state);
 
-  document.querySelectorAll<HTMLButtonElement>('.tab').forEach((btn) => {
+  document.querySelectorAll<HTMLButtonElement>('.tt-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
       const mode = btn.dataset.mode as BudgetSpec['mode'];
       if (mode) setModeTab(mode);
     });
   });
 
-  document.querySelectorAll<HTMLButtonElement>('.preset').forEach((btn) => {
+  document.querySelectorAll<HTMLButtonElement>('.tt-chip').forEach((btn) => {
     btn.addEventListener('click', () => {
-      if (btn.dataset.mins) countdownInput.value = btn.dataset.mins;
+      if (btn.dataset.mins) {
+        countdownInput.value = btn.dataset.mins;
+        syncActivePresetChip();
+      }
     });
   });
+
+  countdownInput.addEventListener('input', syncActivePresetChip);
 
   startBtn.addEventListener('click', async () => {
     let spec: BudgetSpec;

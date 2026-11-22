@@ -1,12 +1,69 @@
-/* Non-destructive video filtering so YouTube's Polymer/Lit DOM recycling stays intact */
+/* ============================================================================
+   TimeTube — Authentic YouTube Design System (Dark & Light Themes)
+   ============================================================================ */
+
+:root {
+  --tt-surface: #212121;
+  --tt-surface-menu: #282828;
+  --tt-surface-base: #0f0f0f;
+  --tt-surface-subtle: rgba(255, 255, 255, 0.08);
+  --tt-surface-hover: rgba(255, 255, 255, 0.16);
+  --tt-divider: rgba(255, 255, 255, 0.1);
+  --tt-text-primary: #f1f1f1;
+  --tt-text-secondary: #aaaaaa;
+  --tt-btn-primary-bg: #f1f1f1;
+  --tt-btn-primary-hover: #d9d9d9;
+  --tt-btn-primary-text: #0f0f0f;
+  --tt-btn-tonal-bg: rgba(255, 255, 255, 0.1);
+  --tt-btn-tonal-hover: rgba(255, 255, 255, 0.2);
+  --tt-accent: #3ea6ff;
+  --tt-red: #ff0033;
+  --tt-red-soft: rgba(255, 0, 51, 0.16);
+  --tt-red-text: #ff6b81;
+  --tt-shadow-menu: 0 4px 32px 0 rgba(0, 0, 0, 0.55);
+  --tt-shadow-dialog: 0 16px 40px 0 rgba(0, 0, 0, 0.65);
+  --tt-switch-track: rgba(255, 255, 255, 0.3);
+  --tt-switch-track-on: rgba(62, 166, 255, 0.45);
+  --tt-switch-knob: #909090;
+  --tt-switch-knob-on: #3ea6ff;
+}
+
+html:not([dark]) {
+  --tt-surface: #ffffff;
+  --tt-surface-menu: #ffffff;
+  --tt-surface-base: #ffffff;
+  --tt-surface-subtle: rgba(0, 0, 0, 0.05);
+  --tt-surface-hover: rgba(0, 0, 0, 0.1);
+  --tt-divider: rgba(0, 0, 0, 0.1);
+  --tt-text-primary: #0f0f0f;
+  --tt-text-secondary: #606060;
+  --tt-btn-primary-bg: #0f0f0f;
+  --tt-btn-primary-hover: #272727;
+  --tt-btn-primary-text: #ffffff;
+  --tt-btn-tonal-bg: rgba(0, 0, 0, 0.05);
+  --tt-btn-tonal-hover: rgba(0, 0, 0, 0.1);
+  --tt-accent: #065fd4;
+  --tt-red: #cc0000;
+  --tt-red-soft: rgba(204, 0, 0, 0.1);
+  --tt-red-text: #cc0000;
+  --tt-shadow-menu: 0 4px 32px 0 rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  --tt-shadow-dialog: 0 16px 40px 0 rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  --tt-switch-track: rgba(0, 0, 0, 0.24);
+  --tt-switch-track-on: rgba(6, 95, 212, 0.38);
+  --tt-switch-knob: #f1f1f1;
+  --tt-switch-knob-on: #065fd4;
+}
+
+/* Non-destructive video filtering */
 [data-ytb-filtered="hide"] {
   display: none !important;
 }
 
 [data-ytb-filtered="dim"] {
-  opacity: 0.2 !important;
+  opacity: 0.22 !important;
   filter: grayscale(0.85) !important;
-  transition: opacity 0.2s ease;
+  transition-property: opacity;
+  transition-duration: 180ms;
 }
 
 /* Hide Shorts entry point in desktop sidebar & mobile bottom bar only */
@@ -21,7 +78,7 @@
 }
 
 /* ============================================================================
-   YouTube Top-Bar TimeTube Button & Anchored Popover Menu
+   YouTube Top-Bar TimeTube Button & Native Multi-Page Menu Popover
    ============================================================================ */
 
 .yt-tt-topbar-wrap {
@@ -43,15 +100,16 @@
   border-radius: 50%;
   background: transparent;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition-property: background-color, transform;
+  transition-duration: 120ms;
 }
 
 .yt-tt-topbar-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--tt-surface-hover);
 }
 
-html:not([dark]) .yt-tt-topbar-btn:hover {
-  background: rgba(0, 0, 0, 0.08);
+.yt-tt-topbar-btn:active {
+  transform: scale(0.96);
 }
 
 .yt-tt-topbar-icon {
@@ -72,11 +130,11 @@ html:not([dark]) .yt-tt-topbar-btn:hover {
   min-width: 18px;
   height: 16px;
   padding: 0 4px;
-  border-radius: 999px;
-  background: #ff0033;
+  border-radius: 9999px;
+  background: #cc0000;
   color: #ffffff;
-  border: 1.5px solid #0f0f0f;
-  font-family: "Roboto", system-ui, -apple-system, sans-serif;
+  border: 1.5px solid var(--tt-surface-base);
+  font-family: "Roboto", "Arial", sans-serif;
   font-size: 10px;
   font-weight: 700;
   line-height: 13px;
@@ -84,10 +142,6 @@ html:not([dark]) .yt-tt-topbar-btn:hover {
   white-space: nowrap;
   pointer-events: none;
   font-variant-numeric: tabular-nums;
-}
-
-html:not([dark]) .yt-tt-topbar-badge {
-  border-color: #ffffff;
 }
 
 .yt-tt-badge-paused {
@@ -98,219 +152,340 @@ html:not([dark]) .yt-tt-topbar-badge {
   display: none !important;
 }
 
+/* Native YouTube ytd-multi-page-menu-renderer look */
 .yt-tt-popover {
   position: absolute;
-  top: 48px;
+  top: 46px;
   right: 0;
   z-index: 2147483640;
-  width: 320px;
-  padding: 14px;
-  border-radius: 14px;
-  background: #0f172a;
-  color: #f8fafc;
-  border: 1px solid #334155;
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.52);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  font-size: 13px;
+  width: 328px;
+  border-radius: 12px;
+  background: var(--tt-surface-menu);
+  color: var(--tt-text-primary);
+  box-shadow: var(--tt-shadow-menu);
+  font-family: "Roboto", "Arial", sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
 
 .yt-tt-pop-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--tt-divider);
 }
 
 .yt-tt-pop-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 15px;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
 }
 
 .yt-tt-pop-logo {
-  width: 20px;
-  height: 20px;
   display: block;
+  border-radius: 50%;
 }
 
-.yt-tt-pill {
-  padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
+.yt-tt-status {
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
 }
 
-.yt-tt-pill-idle {
-  background: #1e293b;
-  color: #94a3b8;
+.yt-tt-status-idle {
+  background: var(--tt-surface-subtle);
+  color: var(--tt-text-secondary);
 }
 
-.yt-tt-pill-active {
-  background: rgba(13, 148, 136, 0.22);
-  color: #2dd4bf;
+.yt-tt-status-active,
+.yt-tt-status-expired {
+  background: var(--tt-red-soft);
+  color: var(--tt-red-text);
 }
 
-.yt-tt-pill-paused {
-  background: rgba(217, 119, 6, 0.22);
-  color: #fbbf24;
+.yt-tt-status-paused {
+  background: rgba(245, 158, 11, 0.16);
+  color: #f59e0b;
 }
 
-.yt-tt-pill-expired {
-  background: rgba(255, 0, 51, 0.2);
-  color: #fda4af;
-}
-
-.yt-tt-card {
-  background: #1e293b;
-  border: 1px solid #334155;
-  border-radius: 10px;
-  padding: 11px;
+.yt-tt-active-strip {
   display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-
-.yt-tt-active-card {
-  flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  background: #134e4a;
-  border-color: #0d9488;
+  padding: 12px 16px;
+  background: var(--tt-surface-subtle);
+  border-bottom: 1px solid var(--tt-divider);
 }
 
-.yt-tt-active-time {
+.yt-tt-active-meta {
   display: flex;
   flex-direction: column;
+  gap: 2px;
 }
 
-.yt-tt-label {
-  font-size: 11px;
-  color: #99f6e4;
+.yt-tt-caption {
+  font-size: 12px;
+  color: var(--tt-text-secondary);
 }
 
-.yt-tt-active-time strong {
-  font-size: 19px;
+.yt-tt-clock {
+  font-size: 20px;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
+  line-height: 24px;
 }
 
 .yt-tt-active-actions {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
+}
+
+.yt-tt-section {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.yt-tt-divider {
+  height: 1px;
+  background: var(--tt-divider);
+  width: 100%;
 }
 
 .yt-tt-tabs {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
-  background: #0f172a;
-  padding: 4px;
-  border-radius: 8px;
+  display: flex;
+  gap: 16px;
+  border-bottom: 1px solid var(--tt-divider);
 }
 
 .yt-tt-tab {
+  position: relative;
   border: 0;
   background: transparent;
-  color: #94a3b8;
-  padding: 6px 4px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
+  color: var(--tt-text-secondary);
+  padding: 0 0 8px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
+  transition-property: color;
+  transition-duration: 120ms;
 }
 
+.yt-tt-tab:hover,
 .yt-tt-tab.active {
-  background: #334155;
-  color: #ffffff;
+  color: var(--tt-text-primary);
 }
 
-.yt-tt-presets {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-  margin-bottom: 8px;
+.yt-tt-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--tt-text-primary);
+  border-radius: 2px 2px 0 0;
 }
 
-.yt-tt-preset {
-  border: 1px solid #475569;
-  background: #0f172a;
-  color: #e2e8f0;
+.yt-tt-mode-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.yt-tt-chips {
+  display: flex;
+  gap: 8px;
+}
+
+.yt-tt-chip {
+  flex: 1;
+  height: 32px;
+  border: 0;
   border-radius: 8px;
-  padding: 6px;
-  font-size: 12px;
-  font-weight: 600;
+  background: var(--tt-surface-subtle);
+  color: var(--tt-text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
+  transition-property: background-color, transform;
+  transition-duration: 120ms;
 }
 
-.yt-tt-preset:hover {
-  border-color: #2dd4bf;
-  color: #2dd4bf;
+.yt-tt-chip:hover {
+  background: var(--tt-surface-hover);
 }
 
-.yt-tt-row {
+.yt-tt-chip.active {
+  background: var(--tt-btn-primary-bg);
+  color: var(--tt-btn-primary-text);
+}
+
+.yt-tt-chip:active,
+.yt-tt-pill-btn:active,
+.yt-timefit-btn:active {
+  transform: scale(0.96);
+}
+
+.yt-tt-field-row,
+.yt-tt-setting-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  color: #e2e8f0;
+  gap: 12px;
+  min-height: 32px;
+  font-size: 13px;
+  color: var(--tt-text-primary);
 }
 
-.yt-tt-row input[type="number"],
-.yt-tt-row input[type="time"],
-.yt-tt-row select {
-  background: #0f172a;
-  color: #f8fafc;
-  border: 1px solid #475569;
-  border-radius: 6px;
-  padding: 4px 8px;
-  font-size: 12px;
-}
-
-.yt-tt-settings h3 {
-  margin: 0;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #94a3b8;
-}
-
-.yt-tt-btn {
-  border: 0;
-  border-radius: 8px;
-  padding: 8px 12px;
-  font-size: 12px;
-  font-weight: 600;
+.yt-tt-setting-row {
   cursor: pointer;
 }
 
-.yt-tt-btn-primary {
-  background: #ff0033;
-  color: #ffffff;
+.yt-tt-input,
+.yt-tt-select {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--tt-divider);
+  border-radius: 8px;
+  background: var(--tt-surface-subtle);
+  color: var(--tt-text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
-.yt-tt-btn-primary:hover {
-  background: #dc002c;
+.yt-tt-select option {
+  background: var(--tt-surface-menu);
+  color: var(--tt-text-primary);
 }
 
-.yt-tt-btn-secondary {
-  background: #0f172a;
-  color: #f8fafc;
-  border: 1px solid #475569;
+.yt-tt-pill-btn {
+  height: 36px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 9999px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition-property: background-color, transform;
+  transition-duration: 120ms;
 }
 
-.yt-tt-btn-danger {
-  background: #b91c1c;
-  color: #ffffff;
+.yt-tt-pill-primary {
+  background: var(--tt-btn-primary-bg);
+  color: var(--tt-btn-primary-text);
+}
+
+.yt-tt-pill-primary:hover {
+  background: var(--tt-btn-primary-hover);
+}
+
+.yt-tt-pill-tonal {
+  height: 32px;
+  padding: 0 12px;
+  background: var(--tt-btn-tonal-bg);
+  color: var(--tt-text-primary);
+}
+
+.yt-tt-pill-tonal:hover {
+  background: var(--tt-btn-tonal-hover);
+}
+
+.yt-tt-pill-danger {
+  height: 32px;
+  padding: 0 12px;
+  background: var(--tt-red-soft);
+  color: var(--tt-red-text);
+}
+
+.yt-tt-pill-danger:hover {
+  background: rgba(255, 0, 51, 0.25);
 }
 
 .yt-tt-full {
   width: 100%;
 }
 
+.yt-tt-settings {
+  gap: 8px;
+  padding-top: 12px;
+  padding-bottom: 14px;
+}
+
+.yt-tt-section-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--tt-text-secondary);
+}
+
+/* Native YouTube toggle switch inside popover */
+.yt-tt-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.yt-tt-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+}
+
+.yt-tt-switch-track {
+  position: relative;
+  width: 36px;
+  height: 14px;
+  border-radius: 9999px;
+  background: var(--tt-switch-track);
+  transition-property: background-color;
+  transition-duration: 140ms;
+}
+
+.yt-tt-switch-knob {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--tt-switch-knob);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transition-property: transform, background-color;
+  transition-duration: 140ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.yt-tt-switch input:checked + .yt-tt-switch-track {
+  background: var(--tt-switch-track-on);
+}
+
+.yt-tt-switch input:checked + .yt-tt-switch-track .yt-tt-switch-knob {
+  transform: translateX(16px);
+  background: var(--tt-switch-knob-on);
+}
+
 /* ============================================================================
-   Shorts Duration Pill, Red Cutoff Bar, Modals & Expired Takeover
+   Shorts Duration Pill, Red Cutoff Bar, Native YouTube Dialogs & Expired Page
    ============================================================================ */
 
 .yt-timefit-short-duration {
@@ -318,16 +493,17 @@ html:not([dark]) .yt-tt-topbar-badge {
   right: 8px;
   bottom: 8px;
   z-index: 20;
-  padding: 2px 6px;
+  padding: 2px 5px;
   border-radius: 4px;
-  background: rgba(15, 15, 15, 0.88);
+  background: rgba(0, 0, 0, 0.8);
   color: #ffffff;
-  font-family: "Roboto", system-ui, -apple-system, sans-serif;
+  font-family: "Roboto", "Arial", sans-serif;
   font-size: 12px;
-  font-weight: 600;
-  line-height: 1.2;
+  font-weight: 500;
+  line-height: 14px;
   letter-spacing: 0.02em;
   pointer-events: none;
+  font-variant-numeric: tabular-nums;
 }
 
 .yt-timefit-cutoff-bar {
@@ -336,30 +512,30 @@ html:not([dark]) .yt-tt-topbar-badge {
   bottom: 0;
   right: 0;
   z-index: 45;
-  background: rgba(239, 68, 68, 0.78);
+  background: rgba(255, 0, 51, 0.78);
   border-left: 2px solid #ffffff;
   pointer-events: none;
 }
 
 .yt-timefit-autoplay-highlight {
-  outline: 3px solid #f59e0b !important;
+  outline: 3px solid var(--tt-accent) !important;
   outline-offset: 4px !important;
   border-radius: 6px !important;
-  box-shadow: 0 0 0 8px rgba(245, 158, 11, 0.25) !important;
+  box-shadow: 0 0 0 8px rgba(62, 166, 255, 0.25) !important;
 }
 
 .yt-timefit-finish-banner {
   margin: 0 0 12px 0;
-  padding: 14px 16px;
+  padding: 12px 16px;
   border-radius: 12px;
-  background: #0f172a;
-  color: #f8fafc;
-  border: 1px solid #334155;
-  font-family: "Roboto", system-ui, -apple-system, sans-serif;
+  background: var(--tt-surface-subtle);
+  color: var(--tt-text-primary);
+  font-family: "Roboto", "Arial", sans-serif;
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 19px;
 }
 
+/* Native YouTube tp-yt-paper-dialog look */
 .yt-timefit-backdrop {
   position: fixed;
   inset: 0;
@@ -368,21 +544,19 @@ html:not([dark]) .yt-tt-topbar-badge {
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: rgba(15, 23, 42, 0.78);
-  backdrop-filter: blur(5px);
+  background: rgba(0, 0, 0, 0.65);
   pointer-events: auto;
 }
 
 .yt-timefit-modal {
   width: 100%;
-  max-width: 450px;
-  padding: 22px 24px;
-  border-radius: 16px;
-  background: #111827;
-  color: #f9fafb;
-  border: 1px solid #374151;
-  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.45);
-  font-family: "Roboto", system-ui, -apple-system, sans-serif;
+  max-width: 440px;
+  padding: 24px;
+  border-radius: 12px;
+  background: var(--tt-surface);
+  color: var(--tt-text-primary);
+  box-shadow: var(--tt-shadow-dialog);
+  font-family: "Roboto", "Arial", sans-serif;
 }
 
 .yt-timefit-modal-header {
@@ -390,34 +564,34 @@ html:not([dark]) .yt-tt-topbar-badge {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .yt-timefit-modal h2 {
   margin: 0;
   font-size: 18px;
-  font-weight: 700;
-  color: #ffffff;
+  font-weight: 500;
+  line-height: 24px;
+  color: var(--tt-text-primary);
 }
 
 .yt-timefit-modal-timer {
   flex-shrink: 0;
   padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(255, 0, 51, 0.18);
-  color: #fda4af;
-  border: 1px solid rgba(255, 0, 51, 0.35);
+  border-radius: 8px;
+  background: var(--tt-surface-subtle);
+  color: var(--tt-text-primary);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .yt-timefit-modal p {
-  margin: 0 0 18px 0;
+  margin: 0 0 20px 0;
   font-size: 14px;
-  line-height: 1.5;
-  color: #d1d5db;
+  line-height: 20px;
+  color: var(--tt-text-secondary);
 }
 
 .yt-timefit-actions {
@@ -428,47 +602,51 @@ html:not([dark]) .yt-tt-topbar-badge {
 }
 
 .yt-timefit-btn {
-  padding: 9px 14px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 9999px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
-  border: 1px solid transparent;
+  border: 0;
+  transition-property: background-color, transform;
+  transition-duration: 120ms;
 }
 
 .yt-timefit-btn-primary {
-  background: #ff0033;
-  color: #ffffff;
+  background: var(--tt-btn-primary-bg);
+  color: var(--tt-btn-primary-text);
 }
 
 .yt-timefit-btn-primary:hover {
-  background: #dc002c;
+  background: var(--tt-btn-primary-hover);
 }
 
 .yt-timefit-btn-secondary {
-  background: #1f2937;
-  color: #f3f4f6;
-  border-color: #4b5563;
+  background: var(--tt-btn-tonal-bg);
+  color: var(--tt-text-primary);
 }
 
 .yt-timefit-btn-secondary:hover {
-  background: #374151;
+  background: var(--tt-btn-tonal-hover);
 }
 
 .yt-timefit-btn-ghost {
   background: transparent;
-  color: #9ca3af;
+  color: var(--tt-accent);
 }
 
 .yt-timefit-btn-ghost:hover {
-  color: #f3f4f6;
+  background: rgba(62, 166, 255, 0.14);
 }
 
+/* Native YouTube Time's Up Takeover */
 .yt-timefit-expired-body {
   margin: 0 !important;
   padding: 0 !important;
-  background: #0f172a !important;
-  color: #f8fafc !important;
+  background: var(--tt-surface-base) !important;
+  color: var(--tt-text-primary) !important;
   overflow: hidden !important;
 }
 
@@ -479,26 +657,26 @@ html:not([dark]) .yt-tt-topbar-badge {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: #0f172a;
-  font-family: "Roboto", system-ui, -apple-system, sans-serif;
+  background: var(--tt-surface-base);
+  font-family: "Roboto", "Arial", sans-serif;
 }
 
 .yt-timefit-expired-card {
-  max-width: 440px;
+  max-width: 420px;
   text-align: center;
 }
 
 .yt-timefit-expired-card h1 {
-  margin: 0 0 12px 0;
-  font-size: 32px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: #ffffff;
+  margin: 0 0 10px 0;
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--tt-text-primary);
 }
 
 .yt-timefit-expired-card p {
   margin: 0;
-  font-size: 15px;
-  line-height: 1.6;
-  color: #94a3b8;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--tt-text-secondary);
 }

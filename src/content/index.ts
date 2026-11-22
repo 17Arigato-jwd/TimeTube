@@ -71,7 +71,6 @@ let expiredScreenRendered = false;
 let mediaListenersAttached = false;
 let inputBlockerAttached = false;
 let ignorePauseUntilMs = 0;
-let choseKeepTimerGoing = false;
 let timerPausedByVideo = false;
 let pausePromptTimer: number | null = null;
 let seekOverrunTimer: number | null = null;
@@ -157,10 +156,6 @@ function formatSpeed(speed: number): string {
   return `${Number(speed.toFixed(2))}×`;
 }
 
-/**
- * Inspects YouTube's watch-player Autoplay toggle carefully (both aria-checked and
- * tooltip/title text) so we ONLY report 'enabled' when Autoplay is genuinely ON.
- */
 function readAutoplayToggleState(): AutoplayObservedState {
   const toggleBtn = document.querySelector<HTMLElement>(
     'button[data-tooltip-target-id="ytp-autonav-toggle-button"], .ytp-autonav-toggle-button',
@@ -262,7 +257,8 @@ function showModal(
   id: string,
   title: string,
   body: string,
-  actions: Array<{ label: string; variant: 'primary' | 'secondary' | 'ghost'; onClick: () => void }>,
+  actions: Array<{ id?: string; label: string; variant: 'primary' | 'secondary' | 'ghost'; onClick: () => void }>,
+  onTick?: (elements: { bodyEl: HTMLParagraphElement; buttons: Map<string, HTMLButtonElement> }) => void,
 ): void {
   if (activeModalId === id && document.getElementById('yt-timefit-modal-root')) {
     return;
@@ -291,6 +287,25 @@ function showModal(
   timerPill.className = 'yt-timefit-modal-timer';
   headerRow.appendChild(timerPill);
 
+  const text = document.createElement('p');
+  text.textContent = body;
+
+  const btnRow = document.createElement('div');
+  btnRow.className = 'yt-timefit-actions';
+
+  let firstButton: HTMLButtonElement | null = null;
+  const buttonMap = new Map<string, HTMLButtonElement>();
+  for (const act of actions) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = act.label;
+    btn.className = `yt-timefit-btn yt-timefit-btn-${act.variant}`;
+    btn.addEventListener('click', act.onClick);
+    if (act.id) buttonMap.set(act.id, btn);
+    if (!firstButton) firstButton = btn;
+    btnRow.appendChild(btn);
+  }
+
   const refreshModalTimer = () => {
     const snap = getCurrentSnapshot();
     if (snap.status === 'expired') {
@@ -306,26 +321,10 @@ function showModal(
     } else {
       timerPill.style.display = 'none';
     }
+    onTick?.({ bodyEl: text, buttons: buttonMap });
   };
   refreshModalTimer();
   modalTimerInterval = window.setInterval(refreshModalTimer, 500);
-
-  const text = document.createElement('p');
-  text.textContent = body;
-
-  const btnRow = document.createElement('div');
-  btnRow.className = 'yt-timefit-actions';
-
-  let firstButton: HTMLButtonElement | null = null;
-  for (const act of actions) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = act.label;
-    btn.className = `yt-timefit-btn yt-timefit-btn-${act.variant}`;
-    btn.addEventListener('click', act.onClick);
-    if (!firstButton) firstButton = btn;
-    btnRow.appendChild(btn);
-  }
 
   card.appendChild(headerRow);
   card.appendChild(text);
@@ -415,66 +414,93 @@ function evaluateMediaOverrun(
     return;
   }
 
-  if (
-    (trigger === 'direct_link' || trigger === 'seek_back' || trigger === 'rate_change') &&
-    acceptedEarlyCutoffVideoId === videoId
-  ) {
+  // If user already accepted early cutoff on this video, keep updating the red bar instead of re-prompting
+  if (acceptedEarlyCutoffVideoId === videoId) {
     updateEarlyCutoffBar(video, snapshot);
     return;
   }
 
   pauseActiveVideo(true);
 
-  const actions: Array<{ label: string; variant: 'primary' | 'secondary' | 'ghost'; onClick: () => void }> = [
+  const computeLatest = () => {
+    const snap = getCurrentSnapshot();
+    const rem = snap.remainingMs ?? 0;
+    return computePlaybackOverrun(video.currentTime, video.duration, video.playbackRate, rem);
+  };
+
+  const formatOverrunBody = (a: ReturnType<typeof computePlaybackOverrun>) =>
+    `There is ${formatHumanDuration(a.videoRemainingSeconds)} left in this video, ` +
+    `but only ${formatHumanDuration(a.breakRemainingSeconds)} left on your timer.` +
+    (a.suggestedSpeed === null ? ' Even at 2× speed, it will run past your break.' : '');
+
+  const actions: Array<{ id?: string; label: string; variant: 'primary' | 'secondary' | 'ghost'; onClick: () => void }> = [
     {
+      id: 'add_time',
       label: `Add +${formatHumanDuration(analysis.extraSecondsNeeded)} to timer`,
       variant: 'primary',
       onClick: async () => {
+        const fresh = computeLatest();
         removeModal();
         acceptedEarlyCutoffVideoId = null;
         clearEarlyCutoffBar();
         persistedState = await webext.runtime.sendMessage<PersistedSessionState>({
           type: 'EXTEND_SESSION_SECONDS',
-          additionalSeconds: analysis.extraSecondsNeeded + 5,
+          additionalSeconds: Math.max(1, fresh.extraSecondsNeeded) + 5,
         });
         runFullSweep();
         resumeVideo(video);
       },
     },
-  ];
-
-  if (analysis.suggestedSpeed !== null) {
-    const targetSpeed = analysis.suggestedSpeed;
-    actions.push({
-      label: `Speed up to ${formatSpeed(targetSpeed)}`,
+    {
+      id: 'speed_up',
+      label: analysis.suggestedSpeed !== null ? `Speed up to ${formatSpeed(analysis.suggestedSpeed)}` : '',
       variant: 'secondary',
       onClick: () => {
+        const fresh = computeLatest();
+        if (fresh.suggestedSpeed === null) return;
         removeModal();
         acceptedEarlyCutoffVideoId = null;
         clearEarlyCutoffBar();
-        video.playbackRate = targetSpeed;
+        video.playbackRate = fresh.suggestedSpeed;
         resumeVideo(video);
       },
-    });
-  }
-
-  actions.push({
-    label: 'Accept early cutoff',
-    variant: 'ghost',
-    onClick: () => {
-      removeModal();
-      acceptedEarlyCutoffVideoId = videoId;
-      updateEarlyCutoffBar(video, getCurrentSnapshot());
-      resumeVideo(video);
     },
-  });
+    {
+      id: 'accept_cutoff',
+      label: 'Accept early cutoff',
+      variant: 'ghost',
+      onClick: () => {
+        removeModal();
+        acceptedEarlyCutoffVideoId = videoId;
+        updateEarlyCutoffBar(video, getCurrentSnapshot());
+        resumeVideo(video);
+      },
+    },
+  ];
 
-  const body =
-    `There is ${formatHumanDuration(analysis.videoRemainingSeconds)} left in this video, ` +
-    `but only ${formatHumanDuration(analysis.breakRemainingSeconds)} left on your timer.` +
-    (analysis.suggestedSpeed === null ? ' Even at 2× speed, it will run past your break.' : '');
-
-  showModal(`overrun_${videoId}_${trigger}`, "This video won't finish before time is up", body, actions);
+  showModal(
+    `overrun_${videoId}_${trigger}`,
+    "This video won't finish before time is up",
+    formatOverrunBody(analysis),
+    actions,
+    ({ bodyEl, buttons }) => {
+      const fresh = computeLatest();
+      bodyEl.textContent = formatOverrunBody(fresh);
+      const addBtn = buttons.get('add_time');
+      if (addBtn) {
+        addBtn.textContent = `Add +${formatHumanDuration(fresh.extraSecondsNeeded)} to timer`;
+      }
+      const speedBtn = buttons.get('speed_up');
+      if (speedBtn) {
+        if (fresh.suggestedSpeed !== null) {
+          speedBtn.style.display = '';
+          speedBtn.textContent = `Speed up to ${formatSpeed(fresh.suggestedSpeed)}`;
+        } else {
+          speedBtn.style.display = 'none';
+        }
+      }
+    },
+  );
 }
 
 function attachDocumentMediaListeners(): void {
@@ -502,11 +528,7 @@ function attachDocumentMediaListeners(): void {
           return;
         }
 
-        if (snapshot.spec?.mode === 'until') {
-          choseKeepTimerGoing = true;
-          return;
-        }
-
+        // Countdown timers offer "Pause timer" vs "Keep timer going"; "until" mode keeps running
         if (snapshot.spec?.mode !== 'countdown') {
           return;
         }
@@ -524,7 +546,6 @@ function attachDocumentMediaListeners(): void {
             onClick: async () => {
               removeModal();
               timerPausedByVideo = true;
-              choseKeepTimerGoing = false;
               persistedState = await webext.runtime.sendMessage<PersistedSessionState>({
                 type: 'PAUSE_TIMER',
               });
@@ -537,7 +558,6 @@ function attachDocumentMediaListeners(): void {
             onClick: () => {
               removeModal();
               timerPausedByVideo = false;
-              choseKeepTimerGoing = true;
             },
           },
         ]);
@@ -565,7 +585,6 @@ function attachDocumentMediaListeners(): void {
 
       if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
 
-      // Silently verify Autoplay in the background while the video plays
       checkAutoplayWhilePlaying();
       if (activeModalId !== null) return;
 
@@ -575,20 +594,14 @@ function attachDocumentMediaListeners(): void {
           type: 'RESUME_TIMER',
         });
         runFullSweep();
-        return;
       }
 
-      if (choseKeepTimerGoing) {
-        choseKeepTimerGoing = false;
-        evaluateMediaOverrun(video, 'resume');
-        return;
-      }
-
+      // Always verify whether the resumed or newly started video fits in remaining break time
       const mediaId = getActiveMediaId();
-      if (mediaId && mediaId !== lastDirectCheckedVideoId) {
+      if (mediaId) {
         lastDirectCheckedVideoId = mediaId;
-        evaluateMediaOverrun(video, 'direct_link');
       }
+      evaluateMediaOverrun(video, 'resume');
     },
     true,
   );
@@ -765,10 +778,6 @@ function highlightAutoplayToggle(): void {
   }, 6_000);
 }
 
-/**
- * Checks Autoplay silently in the background ONLY while a video is playing on /watch.
- * Never prompts when Autoplay is OFF or unmounted.
- */
 function checkAutoplayWhilePlaying(): void {
   if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
   if (!isWatchPage()) {
@@ -798,7 +807,6 @@ function checkAutoplayWhilePlaying(): void {
     return;
   }
 
-  // Only pause and prompt when Autoplay is explicitly confirmed ON while a video is playing
   if (observed === 'enabled' && !autoplayGuideActive && isVideoActivelyPlaying()) {
     pauseActiveVideo(true);
     showAutoplayDetectedPrompt();
@@ -1263,7 +1271,7 @@ async function mountYouTubeFilterHost(): Promise<void> {
 
   window.addEventListener('yt-navigate-finish', () => {
     consecutiveScrollNudges = 0;
-    choseKeepTimerGoing = false;
+    lastDirectCheckedVideoId = null;
     window.setTimeout(() => {
       checkAutoplayWhilePlaying();
       runFullSweep();
@@ -1284,7 +1292,6 @@ async function mountYouTubeFilterHost(): Promise<void> {
     runFullSweep();
   }, SWEEP_INTERVAL_MS);
 
-  // Keep the YouTube header badge ticking smoothly every second (especially for 53s, 42s, 3s)
   topbarTickInterval = window.setInterval(() => {
     if (document.hidden || expiredScreenRendered) return;
     updateTopbarBadge(persistedState);

@@ -42,19 +42,25 @@ function formatMs(ms) {
 }
 function setModeTab(mode) {
   selectedMode = mode;
-  document.querySelectorAll(".tab").forEach((btn) => {
+  document.querySelectorAll(".tt-tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.mode === mode);
   });
   document.getElementById("panel-countdown")?.classList.toggle("hidden", mode !== "countdown");
   document.getElementById("panel-until")?.classList.toggle("hidden", mode !== "until");
   document.getElementById("panel-maxLength")?.classList.toggle("hidden", mode !== "maxLength");
 }
+function syncActivePresetChip() {
+  const val = countdownInput.value.trim();
+  document.querySelectorAll(".tt-chip").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.mins === val);
+  });
+}
 function renderState(state) {
   currentState = state;
   const remainingMs = computeRemainingMs(state, Date.now());
   if (state.status === "active" || state.status === "paused") {
-    statusPill.textContent = state.status === "paused" ? "Paused" : state.spec?.mode === "maxLength" ? "Max Length" : "Active";
-    statusPill.className = state.status === "paused" ? "pill pill-paused" : "pill pill-active";
+    statusPill.textContent = state.status === "paused" ? "Paused" : state.spec?.mode === "maxLength" ? "Max length" : "Active";
+    statusPill.className = state.status === "paused" ? "tt-status tt-status-paused" : "tt-status tt-status-active";
     activeBanner.classList.remove("hidden");
     if (state.spec?.mode === "maxLength") {
       remainingDisplay.textContent = `\u2264 ${state.spec.maxMinutes}m`;
@@ -64,14 +70,14 @@ function renderState(state) {
       extendBtn.classList.remove("hidden");
     }
   } else if (state.status === "expired") {
-    statusPill.textContent = "Break Ended";
-    statusPill.className = "pill pill-expired";
+    statusPill.textContent = "Time up";
+    statusPill.className = "tt-status tt-status-expired";
     activeBanner.classList.remove("hidden");
     remainingDisplay.textContent = "0:00";
     extendBtn.classList.remove("hidden");
   } else {
-    statusPill.textContent = "Idle";
-    statusPill.className = "pill pill-idle";
+    statusPill.textContent = "Off";
+    statusPill.className = "tt-status tt-status-idle";
     activeBanner.classList.add("hidden");
   }
   disableShortsCheckbox.checked = state.policy.shortsMode === "redirectToWatch";
@@ -98,17 +104,21 @@ async function initPopup() {
   await webext.runtime.sendMessage({ type: "WAKE_FROM_POPUP" }).catch(() => void 0);
   const state = await webext.runtime.sendMessage({ type: "GET_STATE" });
   renderState(state);
-  document.querySelectorAll(".tab").forEach((btn) => {
+  document.querySelectorAll(".tt-tab").forEach((btn) => {
     btn.addEventListener("click", () => {
       const mode = btn.dataset.mode;
       if (mode) setModeTab(mode);
     });
   });
-  document.querySelectorAll(".preset").forEach((btn) => {
+  document.querySelectorAll(".tt-chip").forEach((btn) => {
     btn.addEventListener("click", () => {
-      if (btn.dataset.mins) countdownInput.value = btn.dataset.mins;
+      if (btn.dataset.mins) {
+        countdownInput.value = btn.dataset.mins;
+        syncActivePresetChip();
+      }
     });
   });
+  countdownInput.addEventListener("input", syncActivePresetChip);
   startBtn.addEventListener("click", async () => {
     let spec;
     if (selectedMode === "countdown") {
