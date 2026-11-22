@@ -114,18 +114,20 @@ function getActiveMediaId(): string | null {
 }
 
 function isMainPlayerVideo(el: EventTarget | null): el is HTMLVideoElement {
-  if (!(el instanceof HTMLVideoElement)) return false;
+  if (!el || typeof (el as Element).tagName !== 'string') return false;
+  if ((el as Element).tagName.toUpperCase() !== 'VIDEO') return false;
   if (!isWatchPage() && !isShortsPage()) return false;
-  if (!Number.isFinite(el.duration) || el.duration <= 0) return false;
+  const video = el as HTMLVideoElement;
+  if (!Number.isFinite(video.duration) || video.duration <= 0) return false;
   if (isWatchPage()) {
     return Boolean(
-      el.classList.contains('html5-main-video') ||
-        el.closest('#movie_player, .html5-video-player, ytd-player'),
+      video.classList.contains('html5-main-video') ||
+        video.closest('#movie_player, .html5-video-player, ytd-player'),
     );
   }
   return Boolean(
-    el.closest('#shorts-player, ytd-reel-video-renderer, .html5-video-player') ||
-      el.classList.contains('html5-main-video'),
+    video.closest('#shorts-player, ytd-reel-video-renderer, .html5-video-player') ||
+      video.classList.contains('html5-main-video'),
   );
 }
 
@@ -527,7 +529,7 @@ function attachDocumentMediaListeners(): void {
   if (mediaListenersAttached) return;
   mediaListenersAttached = true;
 
-  document.addEventListener(
+  window.addEventListener(
     'pause',
     (event) => {
       if (Date.now() < ignorePauseUntilMs) return;
@@ -535,7 +537,6 @@ function attachDocumentMediaListeners(): void {
       if (!isMainPlayerVideo(event.target)) return;
 
       const video = event.target;
-      if (video.ended || video.seeking) return;
 
       if (pausePromptTimer !== null) window.clearTimeout(pausePromptTimer);
       pausePromptTimer = window.setTimeout(() => {
@@ -547,12 +548,11 @@ function attachDocumentMediaListeners(): void {
         if (snapshot.status !== 'active' || snapshot.remainingMs === null) {
           return;
         }
-
-        // Countdown timers offer "Pause timer" vs "Keep timer going"; "until" mode keeps running
-        if (snapshot.spec?.mode !== 'countdown') {
+        if (!snapshot.spec || snapshot.spec.mode === 'maxLength') {
           return;
         }
 
+        const isUntilMode = snapshot.spec.mode === 'until';
         const vidRem = Math.max(0, video.duration - video.currentTime);
         const body =
           vidRem > 0
@@ -561,7 +561,7 @@ function attachDocumentMediaListeners(): void {
 
         showModal('pause_timer_choice', 'Video paused — pause your timer too?', body, [
           {
-            label: 'Pause timer',
+            label: isUntilMode ? 'Pause timer (shifts end time)' : 'Pause timer',
             variant: 'primary',
             onClick: async () => {
               removeModal();
@@ -573,7 +573,7 @@ function attachDocumentMediaListeners(): void {
             },
           },
           {
-            label: 'Keep timer going',
+            label: isUntilMode ? 'Keep end time' : 'Keep timer going',
             variant: 'secondary',
             onClick: () => {
               removeModal();

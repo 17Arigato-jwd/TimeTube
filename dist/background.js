@@ -287,7 +287,7 @@ async function handleMessage(msg) {
       return next;
     }
     case "PAUSE_TIMER": {
-      if (state.status !== "active" || state.spec?.mode !== "countdown" || state.endsAtMs === null) {
+      if (state.status !== "active" || !state.spec || state.spec.mode === "maxLength" || state.endsAtMs === null) {
         return state;
       }
       const remaining = Math.max(0, state.endsAtMs - nowMs);

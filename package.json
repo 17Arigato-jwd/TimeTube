@@ -1,6 +1,6 @@
 {
   "name": "timetube-extension",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Cross-browser (Chrome & Firefox MV3) YouTube extension that dynamically filters videos so you only see ones you can finish before your break ends.",
   "private": true,
   "scripts": {

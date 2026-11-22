@@ -707,16 +707,18 @@
     return null;
   }
   function isMainPlayerVideo(el) {
-    if (!(el instanceof HTMLVideoElement)) return false;
+    if (!el || typeof el.tagName !== "string") return false;
+    if (el.tagName.toUpperCase() !== "VIDEO") return false;
     if (!isWatchPage() && !isShortsPage()) return false;
-    if (!Number.isFinite(el.duration) || el.duration <= 0) return false;
+    const video = el;
+    if (!Number.isFinite(video.duration) || video.duration <= 0) return false;
     if (isWatchPage()) {
       return Boolean(
-        el.classList.contains("html5-main-video") || el.closest("#movie_player, .html5-video-player, ytd-player")
+        video.classList.contains("html5-main-video") || video.closest("#movie_player, .html5-video-player, ytd-player")
       );
     }
     return Boolean(
-      el.closest("#shorts-player, ytd-reel-video-renderer, .html5-video-player") || el.classList.contains("html5-main-video")
+      video.closest("#shorts-player, ytd-reel-video-renderer, .html5-video-player") || video.classList.contains("html5-main-video")
     );
   }
   function isVideoActivelyPlaying() {
@@ -1025,14 +1027,13 @@
   function attachDocumentMediaListeners() {
     if (mediaListenersAttached) return;
     mediaListenersAttached = true;
-    document.addEventListener(
+    window.addEventListener(
       "pause",
       (event) => {
         if (Date.now() < ignorePauseUntilMs) return;
         if (snoozedUntilReloadOrPopup || expiredScreenRendered) return;
         if (!isMainPlayerVideo(event.target)) return;
         const video = event.target;
-        if (video.ended || video.seeking) return;
         if (pausePromptTimer !== null) window.clearTimeout(pausePromptTimer);
         pausePromptTimer = window.setTimeout(() => {
           pausePromptTimer = null;
@@ -1042,14 +1043,15 @@
           if (snapshot.status !== "active" || snapshot.remainingMs === null) {
             return;
           }
-          if (snapshot.spec?.mode !== "countdown") {
+          if (!snapshot.spec || snapshot.spec.mode === "maxLength") {
             return;
           }
+          const isUntilMode = snapshot.spec.mode === "until";
           const vidRem = Math.max(0, video.duration - video.currentTime);
           const body = vidRem > 0 ? `Choose whether to pause your break timer while this video (${formatHumanDuration(vidRem)} left) is paused, or keep the timer running.` : "Choose whether to pause your break timer while the video is paused, or keep it running.";
           showModal("pause_timer_choice", "Video paused \u2014 pause your timer too?", body, [
             {
-              label: "Pause timer",
+              label: isUntilMode ? "Pause timer (shifts end time)" : "Pause timer",
               variant: "primary",
               onClick: async () => {
                 removeModal();
@@ -1061,7 +1063,7 @@
               }
             },
             {
-              label: "Keep timer going",
+              label: isUntilMode ? "Keep end time" : "Keep timer going",
               variant: "secondary",
               onClick: () => {
                 removeModal();

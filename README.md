@@ -1,4 +1,4 @@
-# TimeTube v1.2.1 (`timetube@vchs.com`)
+# TimeTube v1.2.2 (`timetube@vchs.com`)
 
 A cross-browser (Chrome & Firefox MV3) YouTube extension that dynamically filters Home, Search, and Watch sidebar recommendations so you only see videos you have time to finish before your break ends.
 
