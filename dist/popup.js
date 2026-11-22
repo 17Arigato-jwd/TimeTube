@@ -1,3 +1,13 @@
+// src/core/duration.ts
+function getDefaultEndTime(nowMs = Date.now()) {
+  const d = new Date(nowMs);
+  const totalMinutes = d.getHours() * 60 + d.getMinutes();
+  const nextQuarter = (Math.floor(totalMinutes / 15) + 1) * 15 % (24 * 60);
+  const hh = String(Math.floor(nextQuarter / 60)).padStart(2, "0");
+  const mm = String(nextQuarter % 60).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
 // src/core/policy.ts
 function computeRemainingMs(state, nowMs) {
   if (!state.spec || state.spec.mode === "maxLength") {
@@ -103,6 +113,7 @@ async function syncPolicy() {
 async function initPopup() {
   await webext.runtime.sendMessage({ type: "WAKE_FROM_POPUP" }).catch(() => void 0);
   const state = await webext.runtime.sendMessage({ type: "GET_STATE" });
+  untilInput.value = getDefaultEndTime();
   renderState(state);
   document.querySelectorAll(".tt-tab").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -124,7 +135,7 @@ async function initPopup() {
     if (selectedMode === "countdown") {
       spec = { mode: "countdown", durationMinutes: Math.max(1, Number(countdownInput.value) || 25) };
     } else if (selectedMode === "until") {
-      spec = { mode: "until", endTime: untilInput.value || "17:00" };
+      spec = { mode: "until", endTime: untilInput.value || getDefaultEndTime() };
     } else {
       spec = { mode: "maxLength", maxMinutes: Math.max(1, Number(maxLengthInput.value) || 15) };
     }

@@ -1,3 +1,4 @@
+import { getDefaultEndTime } from '../core/duration';
 import { computeRemainingMs } from '../core/policy';
 import { BudgetSpec, PersistedSessionState } from '../core/types';
 import { webext } from '../shared/webext';
@@ -106,6 +107,7 @@ async function syncPolicy(): Promise<void> {
 async function initPopup(): Promise<void> {
   await webext.runtime.sendMessage({ type: 'WAKE_FROM_POPUP' }).catch(() => undefined);
   const state = await webext.runtime.sendMessage<PersistedSessionState>({ type: 'GET_STATE' });
+  untilInput.value = getDefaultEndTime();
   renderState(state);
 
   document.querySelectorAll<HTMLButtonElement>('.tt-tab').forEach((btn) => {
@@ -131,7 +133,7 @@ async function initPopup(): Promise<void> {
     if (selectedMode === 'countdown') {
       spec = { mode: 'countdown', durationMinutes: Math.max(1, Number(countdownInput.value) || 25) };
     } else if (selectedMode === 'until') {
-      spec = { mode: 'until', endTime: untilInput.value || '17:00' };
+      spec = { mode: 'until', endTime: untilInput.value || getDefaultEndTime() };
     } else {
       spec = { mode: 'maxLength', maxMinutes: Math.max(1, Number(maxLengthInput.value) || 15) };
     }

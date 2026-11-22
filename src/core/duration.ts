@@ -82,3 +82,16 @@ export function extractShortIdFromHref(href: string): string | null {
   const match = href.match(/\/shorts\/([a-zA-Z0-9_-]{6,})/);
   return match?.[1] ?? null;
 }
+
+/**
+ * Returns the next 15-minute wall-clock boundary as local 24h "HH:MM".
+ * Examples: 02:01 -> "02:15", 03:15 -> "03:30", 23:50 -> "00:00".
+ */
+export function getDefaultEndTime(nowMs: number = Date.now()): string {
+  const d = new Date(nowMs);
+  const totalMinutes = d.getHours() * 60 + d.getMinutes();
+  const nextQuarter = ((Math.floor(totalMinutes / 15) + 1) * 15) % (24 * 60);
+  const hh = String(Math.floor(nextQuarter / 60)).padStart(2, '0');
+  const mm = String(nextQuarter % 60).padStart(2, '0');
+  return `${hh}:${mm}`;
+}

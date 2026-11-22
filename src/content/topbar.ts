@@ -1,9 +1,10 @@
-import { formatApproxRemaining } from '../core/duration';
+import { formatApproxRemaining, getDefaultEndTime } from '../core/duration';
 import { computeRemainingMs } from '../core/policy';
 import { BudgetSpec, PersistedSessionState } from '../core/types';
 import { webext } from '../shared/webext';
 
 let popoverOpen = false;
+let userEditedUntilTime = false;
 let selectedMode: BudgetSpec['mode'] = 'countdown';
 let lastState: PersistedSessionState | null = null;
 let outsideClickBound = false;
@@ -199,10 +200,15 @@ function buildPopover(onStateChange: (next: PersistedSessionState) => void): HTM
     });
   });
   countdownInput?.addEventListener('input', syncChips);
+  const untilInputEl = pop.querySelector<HTMLInputElement>('#yt-tt-until-time');
+  if (untilInputEl) {
+    untilInputEl.value = getDefaultEndTime();
+    untilInputEl.addEventListener('input', () => { userEditedUntilTime = true; });
+  }
 
   pop.querySelector<HTMLButtonElement>('#yt-tt-start')?.addEventListener('click', async () => {
     const countdownVal = Number(countdownInput?.value || 25);
-    const untilVal = pop.querySelector<HTMLInputElement>('#yt-tt-until-time')?.value || '17:00';
+    const untilVal = pop.querySelector<HTMLInputElement>('#yt-tt-until-time')?.value || getDefaultEndTime();
     const maxVal = Number(pop.querySelector<HTMLInputElement>('#yt-tt-max-mins')?.value || 15);
 
     let spec: BudgetSpec;
@@ -309,6 +315,10 @@ export function syncTopbarControl(
       popoverOpen = !popoverOpen;
       popover.classList.toggle('yt-tt-hidden', !popoverOpen);
       if (popoverOpen && lastState) {
+        if (!userEditedUntilTime) {
+          const u = popover.querySelector<HTMLInputElement>('#yt-tt-until-time');
+          if (u) u.value = getDefaultEndTime();
+        }
         updatePopoverUI(popover, lastState);
       }
     });

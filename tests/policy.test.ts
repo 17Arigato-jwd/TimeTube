@@ -5,6 +5,7 @@ import {
   extractShortIdFromHref,
   formatApproxRemaining,
   formatDurationBadge,
+  getDefaultEndTime,
   parseDurationText,
 } from '../src/core/duration';
 import {
@@ -160,4 +161,11 @@ test('paused countdown freezes remainingMs cleanly', () => {
   const snap = buildSessionSnapshot(paused, later, { autoplayObserved: 'disabled' });
   assert.equal(snap.status, 'paused');
   assert.equal(snap.remainingMs, 18 * 60_000);
+});
+
+test('getDefaultEndTime rounds strictly up to the next 15-minute mark', () => {
+  assert.equal(getDefaultEndTime(new Date(2026, 10, 22, 2, 1, 0).getTime()), '02:15');
+  assert.equal(getDefaultEndTime(new Date(2026, 10, 22, 3, 15, 0).getTime()), '03:30');
+  assert.equal(getDefaultEndTime(new Date(2026, 10, 22, 14, 14, 59).getTime()), '14:15');
+  assert.equal(getDefaultEndTime(new Date(2026, 10, 22, 23, 50, 0).getTime()), '00:00');
 });
