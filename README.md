@@ -1,10 +1,12 @@
 # TimeTube ⏱️📺
 
+[![CI](https://github.com/17Arigato-jwd/TimeTube/actions/workflows/ci.yml/badge.svg)](https://github.com/17Arigato-jwd/TimeTube/actions/workflows/ci.yml)
 [![Manifest V3](https://img.shields.io/badge/Manifest-V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![Cross-Browser](https://img.shields.io/badge/Browser-Chrome%20%7C%20Firefox%20%7C%20Edge%20%7C%20Brave-orange.svg)]()
 [![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6.svg)](https://www.typescriptlang.org/)
 [![Tests](https://img.shields.io/badge/Tests-Passing%20(12%2F12)-brightgreen.svg)]()
 [![Version](https://img.shields.io/badge/Version-v1.3.0-purple.svg)]()
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > **Never lose track of time on YouTube again.**
 > Cross-browser (Chrome, Firefox, Edge, Brave) extension that dynamically filters Home, Search, and Watch recommendations so you only see videos you actually have time to finish before your break ends.
@@ -13,7 +15,41 @@ Originally developed as **TimeFit**, **TimeTube** has evolved into a complete, i
 
 ---
 
-## ✨ Features
+## 📑 Table of Contents
+
+- [Overview](#timetube-)
+- [✨ Key Features](#-key-features)
+  - [1. In-Page YouTube Top-Bar Menu & Live Badges](#1-in-page-youtube-top-bar-menu--live-badges)
+  - [2. Flexible Budget Modes](#2-flexible-budget-modes)
+  - [3. Active Watch-Sidebar & Feed Pruning](#3-active-watch-sidebar--feed-pruning)
+  - [4. Overrun Guard & Dynamic Playback Speed](#4-overrun-guard--dynamic-playback-speed)
+  - [5. Smart Shorts & Navigation Guardrails](#5-smart-shorts--navigation-guardrails)
+  - [6. Silent Autoplay Verification](#6-silent-autoplay-verification)
+  - [7. Clean Takeover & Lifecycle Auto-Reset](#7-clean-times-up--takeover--lifecycle-auto-reset)
+- [🚀 Installation Guide](#-installation-guide)
+  - [Step 1: Download or Clone the Repository](#step-1-download-or-clone-the-repository)
+  - [Step 2: Load the Extension into Your Browser](#step-2-load-the-extension-into-your-browser)
+    - [Google Chrome & Chromium](#google-chrome--chromium)
+    - [Brave Browser](#brave-browser)
+    - [Microsoft Edge](#microsoft-edge)
+    - [Mozilla Firefox (Desktop)](#mozilla-firefox-desktop)
+    - [Mozilla Firefox (Android / Nightly)](#mozilla-firefox-android--nightly)
+    - [Opera & Vivaldi](#opera--vivaldi)
+  - [Step 3: Verify the Installation](#step-3-verify-the-installation)
+  - [Troubleshooting & Updating](#troubleshooting--updating)
+- [🏗️ Architecture & Codebase Structure](#️-architecture--codebase-structure)
+- [🛠️ Development & Testing](#️-development--testing)
+  - [Prerequisites](#prerequisites)
+  - [Development Commands](#development-commands)
+  - [Automated Unit Tests](#automated-unit-tests)
+- [🤖 Continuous Integration (GitHub Actions)](#-continuous-integration-github-actions)
+- [📜 Version History & Git Milestones](#-version-history--git-milestones)
+- [🔒 Permissions Justification](#-permissions-justification)
+- [📄 License](#-license)
+
+---
+
+## ✨ Key Features
 
 ### 1. In-Page YouTube Top-Bar Menu & Live Badges
 - **Seamless Header Integration:** Injected directly into the YouTube top navigation bar, right beside the **+ Create** button.
@@ -46,6 +82,92 @@ Originally developed as **TimeFit**, **TimeTube** has evolved into a complete, i
 ### 7. Clean "Time's up :)" Takeover & Lifecycle Auto-Reset
 - **Clean Takeover:** When the timer hits zero, TimeTube smoothly cleans up the active page, stops playback, and redirects to `youtube.com/` with a friendly "Time's up :)" message.
 - **10-Second Cooldown Auto-Reset:** Monitors tab lifecycle. When you close all YouTube tabs for $\ge 10$ seconds after a session expires, TimeTube automatically resets itself so your next visit starts fresh.
+
+---
+
+## 🚀 Installation Guide
+
+You can install TimeTube in any Chromium-based or Gecko-based modern browser in just a couple of minutes.
+
+### Step 1: Download or Clone the Repository
+
+**Option A: Clone with Git**
+```bash
+git clone https://github.com/17Arigato-jwd/TimeTube.git
+cd TimeTube
+```
+
+**Option B: Download ZIP from GitHub**
+1. Visit [TimeTube on GitHub](https://github.com/17Arigato-jwd/TimeTube).
+2. Click the green **Code** button and choose **Download ZIP**.
+3. Extract the downloaded archive to a folder on your computer.
+
+*(Note: Pre-compiled distribution bundles in `dist/` are already included in the repository. If you modify source code, see [Development & Testing](#️-development--testing) to rebuild).*
+
+---
+
+### Step 2: Load the Extension into Your Browser
+
+#### Google Chrome & Chromium
+1. Open Google Chrome and enter `chrome://extensions` into your URL address bar.
+2. Toggle on **Developer mode** using the switch located in the top-right corner.
+3. Click the **Load unpacked** button that appears in the top-left toolbar.
+4. In the file picker, select the `TimeTube` root folder (the folder containing `manifest.json`).
+5. TimeTube is now installed and active!
+
+#### Brave Browser
+1. In Brave, navigate to `brave://extensions`.
+2. Toggle on **Developer mode** in the top-right corner.
+3. Click **Load unpacked**.
+4. Select the `TimeTube` root directory containing `manifest.json`.
+
+#### Microsoft Edge
+1. In Edge, navigate to `edge://extensions`.
+2. Enable the **Developer mode** toggle in the left navigation sidebar.
+3. Click the **Load unpacked** button in the main panel.
+4. Browse to and select the `TimeTube` root directory.
+
+#### Mozilla Firefox (Desktop)
+1. Open Firefox and navigate to `about:debugging#/runtime/this-firefox`.
+2. Under the **Temporary Extensions** section, click the **Load Temporary Add-on...** button.
+3. In the file dialog, select `manifest.json` from the `TimeTube` folder.
+4. TimeTube is now active in your Firefox session!
+
+> [!NOTE]
+> Firefox unloads temporary extensions when the browser is completely closed. For permanent installation in Firefox Developer Edition or Nightly, you can package the directory using `web-ext` and load the signed `.xpi` or unsigned extension via `about:config` (`xpinstall.signatures.required = false`).
+
+#### Mozilla Firefox (Android / Nightly)
+1. In Firefox Nightly on Android, go to **Settings** → **About Firefox Nightly**.
+2. Tap the Firefox logo 5 times to enable developer options.
+3. Use `web-ext` on your desktop (`npx web-ext run --target=firefox-android`) or add TimeTube to a custom add-on collection in your Mozilla Add-ons profile to load it onto your device.
+
+#### Opera & Vivaldi
+1. **Opera:** Navigate to `opera://extensions`, enable **Developer Mode**, and click **Load unpacked extension**.
+2. **Vivaldi:** Navigate to `vivaldi://extensions`, toggle **Developer mode**, and select **Load unpacked**.
+
+---
+
+### Step 3: Verify the Installation
+
+1. Open a new tab and navigate to [https://www.youtube.com](https://www.youtube.com).
+2. Look at the top navigation bar next to YouTube's **+ Create** button:
+   - You will see the **TimeTube clock badge** injected directly into the header.
+3. Click on the badge to open the quick-access popover:
+   - Choose a preset (e.g., `25m`) or set a clock end time.
+4. Watch as the sidebar and home feeds dynamically prune unfinishable videos in real time!
+
+---
+
+### Troubleshooting & Updating
+
+- **Updated code not reflecting?**
+  Navigate back to your browser's extensions page (`chrome://extensions` or `about:debugging`), find **TimeTube**, and click the 🔄 **Reload** icon.
+- **Rebuilding after TypeScript edits:**
+  If you edit files in `src/`, run:
+  ```bash
+  npm run build
+  ```
+  and then click the reload icon in your browser's extension manager.
 
 ---
 
@@ -90,32 +212,17 @@ Timetube/
 
 ---
 
-## 🚀 Installation & Unpacked Loading
-
-### Chrome / Brave / Microsoft Edge
-1. Clone or download this repository.
-2. Open `chrome://extensions` (or `edge://extensions` / `brave://extensions`).
-3. Enable **Developer mode** (toggle in the top-right corner).
-4. Click **Load unpacked** and select this directory (`Timetube/`).
-
-### Firefox (Desktop & Android)
-1. Open Firefox and navigate to `about:debugging#/runtime/this-firefox`.
-2. Click **Load Temporary Add-on...**.
-3. Select `manifest.json` in this directory.
-
----
-
 ## 🛠️ Development & Testing
 
 ### Prerequisites
 - [Node.js](https://nodejs.org/) (v18+)
 - `npm`
 
-### Commands
+### Development Commands
 
 ```bash
-# Install development dependencies
-npm install
+# Install development dependencies cleanly
+npm ci
 
 # Build extension bundles into dist/
 npm run build
@@ -138,6 +245,21 @@ The test suite runs with Node's native test runner (`node --test`) and validates
 - [x] Overrun calculations (dynamic playback speed $\le 2\times$ and cutoff percentages)
 - [x] Paused countdown state persistence
 - [x] YouTube tab closure lifecycle tracking & 10s cooldown auto-reset
+
+---
+
+## 🤖 Continuous Integration (GitHub Actions)
+
+This repository includes an automated GitHub Actions CI pipeline located at [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+On every `push` and `pull_request` to the `main` branch, the workflow:
+1. **Checks out the repository** on Ubuntu latest.
+2. **Sets up Node.js 22** with automated `npm` dependency caching.
+3. **Installs exact dependencies** via `npm ci`.
+4. **Runs TypeScript typechecking** (`tsc --noEmit`).
+5. **Runs all 12 automated unit tests** (`npm test`).
+6. **Compiles production bundles** (`npm run build`).
+7. **Packages and uploads the extension artifact** (`timetube-extension-build`), generating a ready-to-download `.zip` on every build run.
 
 ---
 
@@ -172,4 +294,4 @@ The test suite runs with Node's native test runner (`node --test`) and validates
 
 ## 📄 License
 
-ISC / MIT - Feel free to adapt for personal productivity.
+[MIT License](LICENSE) © 2026 17Arigato.jwd
