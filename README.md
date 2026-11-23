@@ -43,6 +43,14 @@ Originally developed as **TimeFit**, **TimeTube** has evolved into a complete, i
   - [Development Commands](#development-commands)
   - [Automated Unit Tests](#automated-unit-tests)
 - [🤖 Continuous Integration (GitHub Actions)](#-continuous-integration-github-actions)
+- [🤝 Contributing Guidelines](#-contributing-guidelines)
+  - [1. Code of Conduct & Etiquette](#1-code-of-conduct--etiquette)
+  - [2. Getting Started & Git Workflow](#2-getting-started--git-workflow)
+  - [3. Commit Message Standards (Conventional Commits)](#3-commit-message-standards-conventional-commits)
+  - [4. Mandatory Quality Gates & Verification Checklist](#4-mandatory-quality-gates--verification-checklist)
+  - [5. Architectural & Cross-Browser Principles](#5-architectural--cross-browser-principles)
+  - [6. Submitting Pull Requests](#6-submitting-pull-requests)
+  - [7. Reporting Bugs & Requesting Features](#7-reporting-bugs--requesting-features)
 - [📜 Version History & Git Milestones](#-version-history--git-milestones)
 - [🔒 Permissions Justification](#-permissions-justification)
 - [📄 License](#-license)
@@ -281,6 +289,129 @@ On every `push` and `pull_request` to the `main` branch, the workflow:
 | `v1.2.1` | Nov 22, 2026 | **Dynamic Playback Speed.** Overrun guard with automatic speed scaling ($\le 2\times$) and red cutoff bar. |
 | `v1.2.2` | Nov 22, 2026 | **Service Worker Lifecycle.** Resilient background worker wakeups and content script reconnection handling. |
 | `v1.3.0` | Nov 22, 2026 | **Tab Lifecycle & Auto-Reset.** Tracks YouTube tab closure, 10s cooldown auto-reset, dismissed notice banners. |
+
+---
+
+## 🤝 Contributing Guidelines
+
+We welcome contributions to **TimeTube**! Whether you are fixing a bug, adding support for a new YouTube UI layout, improving accessibility, or writing tests, your help is appreciated.
+
+To ensure stability, cross-browser compatibility, and maintainability, all contributors must follow these guidelines.
+
+---
+
+### 1. Code of Conduct & Etiquette
+- Be respectful, constructive, and inclusive in issues, PR discussions, and code reviews.
+- Focus on productivity and digital wellbeing—features that encourage dark patterns, engagement-traps, or endless scrolling are strictly anti-goals.
+
+---
+
+### 2. Getting Started & Git Workflow
+1. **Fork the repository** on GitHub: [https://github.com/17Arigato-jwd/TimeTube](https://github.com/17Arigato-jwd/TimeTube)
+2. **Clone your fork locally**:
+   ```bash
+   git clone https://github.com/<your-username>/TimeTube.git
+   cd TimeTube
+   ```
+3. **Install dependencies cleanly**:
+   ```bash
+   npm ci
+   ```
+4. **Create a topic branch** branching from `main`:
+   ```bash
+   git checkout -b feat/your-feature-name
+   # or
+   git checkout -b fix/your-bugfix-description
+   ```
+
+---
+
+### 3. Commit Message Standards (Conventional Commits)
+All commit messages must adhere to the **[Conventional Commits](https://www.conventionalcommits.org/)** specification:
+
+```
+<type>(<scope>): <short description in imperative mood>
+```
+
+- **Allowed Types:**
+  - `feat`: A new feature, UI capability, or policy option
+  - `fix`: A bug fix or selector update
+  - `docs`: Documentation updates or typo corrections
+  - `refactor`: Internal code reorganization that doesn't fix a bug or add a feature
+  - `test`: Adding missing tests or refactoring test suites
+  - `style`: Formatting, whitespace, or CSS token tweaks
+  - `chore`: Build tooling, dependency bumps, or repository configuration
+- **Examples:**
+  - `feat(topbar): add custom snooze button in quick popover`
+  - `fix(parser): support localized Portuguese ARIA duration formats`
+  - `test(policy): add test case for midnight timer rollover`
+  - `docs(readme): clarify unpacked loading steps for Firefox Nightly`
+
+---
+
+### 4. Mandatory Quality Gates & Verification Checklist
+Before opening a Pull Request, ensure every item on this checklist passes locally:
+
+```bash
+# 1. Typecheck: Zero TypeScript errors
+npm run typecheck
+
+# 2. Automated Tests: All tests pass
+npm test
+
+# 3. Production Build: Bundles compile cleanly without errors
+npm run build
+```
+
+- **Automated CI Check:** Every PR will trigger the GitHub Actions CI pipeline. PRs will not be merged if any check fails.
+- **Unit Test Coverage for Logic Changes:**
+  - If you modify `src/core/duration.ts`, `src/core/policy.ts`, or add new budget rules, you **must** add or update corresponding test assertions in `tests/policy.test.ts`.
+  - Strive for 100% test pass rate.
+
+---
+
+### 5. Architectural & Cross-Browser Principles
+
+To keep TimeTube reliable across continuous YouTube updates and different browsers, keep these core principles in mind:
+
+- **1. Strict Cross-Browser MV3 Compatibility:**
+  - TimeTube targets both **Chromium** (Chrome, Brave, Edge, Opera) and **Gecko** (Firefox Desktop & Android) using Manifest V3.
+  - Never call `chrome.*` directly if Firefox behaves differently. Always import browser runtime and storage helpers from `src/shared/webext.ts`.
+- **2. Decouple Core Logic from DOM:**
+  - The `src/core/` folder must remain **pure TypeScript** with zero DOM dependencies (`document`, `window`, or browser globals).
+  - This allows domain logic to be executed and tested at lightning speed in Node.js without needing a browser harness.
+- **3. Defensive YouTube DOM Querying:**
+  - YouTube frequently updates its custom elements (`ytd-*`, `yt-*`) and obfuscates class names.
+  - In `src/content/`, always query using multiple fallback selectors, handle `null` safely, and never assume an element is guaranteed to exist.
+- **4. Scoped CSS & Design Tokens:**
+  - Do not use global tag selectors that could leak into native YouTube components.
+  - All extension styles in `src/content/styles.css` and `popup/popup.css` should use `--tt-*` CSS variables and `.yt-tt-*` class namespaces.
+
+---
+
+### 6. Submitting Pull Requests
+
+1. Push your branch to your GitHub fork:
+   ```bash
+   git push origin feat/your-feature-name
+   ```
+2. Open a Pull Request against the `main` branch of `17Arigato-jwd/TimeTube`.
+3. Provide a clear description:
+   - What problem does this solve?
+   - How was it tested?
+   - For UI changes, attach screenshots or a short screen recording showing the before/after in YouTube.
+4. Respond promptly to review feedback. Keep PRs focused and small—smaller PRs are reviewed and merged much faster!
+
+---
+
+### 7. Reporting Bugs & Requesting Features
+- **Bug Reports:** Open an issue on GitHub with:
+  - Browser name and exact version (e.g. Chrome 131, Firefox 133)
+  - Operating system
+  - YouTube page type (Watch page, Home feed, Search results, Shorts)
+  - Clear step-by-step reproduction instructions and expected vs actual behavior
+  - Console errors from DevTools (if any)
+- **Feature Requests:** Open an issue detailing the use case, why it benefits productivity, and how you envision the user experience.
 
 ---
 
