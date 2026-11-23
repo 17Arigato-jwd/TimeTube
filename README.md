@@ -55,7 +55,6 @@ Originally developed as **TimeFit**, **TimeTube** has evolved into a complete, i
   - [5. Architectural and Cross-Browser Principles](#5-architectural-and-cross-browser-principles)
   - [6. Submitting Pull Requests](#6-submitting-pull-requests)
   - [7. Reporting Bugs and Requesting Features](#7-reporting-bugs-and-requesting-features)
-- [Version History and Git Milestones](#version-history-and-git-milestones)
 - [Permissions Justification](#permissions-justification)
 - [License](#license)
 
@@ -428,27 +427,6 @@ Open an issue detailing:
 - The proposed capability or user flow.
 - Why it benefits user productivity and digital wellbeing.
 - Suggested implementation approach (if known).
-
----
-
-## Version History and Git Milestones
-
-| Version / Tag | Release Date | Summary & Key Changes |
-| :--- | :--- | :--- |
-| `timefit-v1.0.0-rev0` | Nov 21, 2026 | **Initial TimeFit prototype.** MV3 dual-manifest setup, duration parser, policy logic, content pruner. |
-| `timefit-v1.0.0-rev1` | Nov 21, 2026 | **Manifest unification.** Merged Firefox & Chrome configurations into a single `manifest.json`. |
-| `timefit-v1.0.0-rev2` | Nov 21, 2026 | **YouTube Web Components.** Support for modern badge elements, ignored relative timestamps, feed scroll nudging. |
-| `timefit-v1.0.0-rev3` | Nov 21, 2026 | **Timer precision.** Sweep timer, exact expiration dispatch, video pause handling, takeover screen. (rev4 was an identical backup). |
-| `timefit-v1.0.0-rev4` | Nov 21, 2026 | **Popup redesign.** Modernized UI with tabbed navigation, presets, and autoplay settings. |
-| `timefit-v1.0.0-rev5` | Nov 21, 2026 | **Overlay refinements.** Polished modal overlays, smooth video pause transitions. |
-| `timefit-v1.0.0-rev6` | Nov 21, 2026 | **Pruning polish.** Edge-case handling for Shorts durations and YouTube infinite scroll. |
-| `timetube-assets` | Nov 22, 2026 | **Brand identity redesign.** Addition of TimeTube SVG logos (`Main Extension Logo.svg`, topbar logos). |
-| `v1.1.0` | Nov 22, 2026 | **TimeTube Rebrand & In-Page Topbar.** Injected live countdown badge and popover into YouTube navigation header. |
-| `v1.2.0` | Nov 22, 2026 | **Topbar polish & Overrun banner.** Finish line banner, overrun management, enhanced popover interactions. |
-| `v1.2.0-rev1` | Nov 22, 2026 | **Bugfix patch.** Duration edge-case parsing fixes and top-bar state synchronization. |
-| `v1.2.1` | Nov 22, 2026 | **Dynamic Playback Speed.** Overrun guard with automatic speed scaling (<= 2x) and red cutoff bar. |
-| `v1.2.2` | Nov 22, 2026 | **Service Worker Lifecycle.** Resilient background worker wakeups and content script reconnection handling. |
-| `v1.3.0` | Nov 22, 2026 | **Tab Lifecycle & Auto-Reset.** Tracks YouTube tab closure, 10s cooldown auto-reset, dismissed notice banners. |
 
 ---
 
