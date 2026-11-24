@@ -246,7 +246,17 @@ npm test
 ```
 
 ### Automated Unit Tests
-The test suite runs with Node's native test runner (`node --test`) and validates:
+
+Run the test suite using:
+
+```bash
+npm test
+```
+
+> [!NOTE]
+> Always execute tests using `npm test`. Do not run bare `node --test` directly from the terminal, because source files use standard TypeScript extensionless imports that must be bundled by `esbuild` (`scripts/build-tests.mjs`) into `dist-tests/*.test.cjs` before Node's test runner executes them.
+
+The test suite validates:
 - [x] Parsing of `MM:SS`, `HH:MM:SS`, and spoken ARIA duration labels (ignoring relative "ago" labels, LIVE, and New badges)
 - [x] Badge formatting (`1.5hr`, `1hr`, `30m`, `2m`, `53s`, etc.)
 - [x] Countdown and midnight-rollover budget bounds
@@ -336,13 +346,16 @@ All commit messages must adhere to the **[Conventional Commits](https://www.conv
 Before opening a Pull Request, ensure that every verification step passes locally.
 
 #### Running the Test Suite
-TimeTube uses Node.js's built-in test runner coupled with `esbuild`. Run the entire test suite with:
+Always run the test suite with:
 
 ```bash
 npm test
 ```
 
-Under the hood, this compiles test files via `scripts/build-tests.mjs` and executes `node --test dist-tests/*.test.cjs`.
+Under the hood, this compiles test files via `scripts/build-tests.mjs` with `esbuild` and executes `node --test dist-tests/*.test.cjs`.
+
+> [!NOTE]
+> Do not run bare `node --test` directly from the terminal without building. Node's native module loader requires exact file extensions for relative imports and cannot resolve extensionless TypeScript imports (`../src/core/duration`) without bundling. Running `npm test` handles compilation and testing automatically.
 
 #### Requirement to Include Tests for New Features & Bugfixes
 - **Mandatory Test Coverage:** Any Pull Request that introduces a **new feature**, modifies **duration parsing**, changes **budgeting calculations**, alters **recommendation pruning**, or resolves a **bug** **MUST include new test cases** in `tests/policy.test.ts`.
