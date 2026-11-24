@@ -101,6 +101,7 @@ body:
         - Extension toolbar popup
         - Takeover screen (Time's up)
         - Global / across all pages
+        - Other (specify in the bug description)
     validations:
       required: true
 
@@ -133,7 +134,7 @@ body:
     attributes:
       label: Other Active YouTube Extensions
       description: List any other extensions that modify YouTube (e.g., uBlock Origin, SponsorBlock, Return YouTube Dislike). Type "None" if none are installed.
-      placeholder: "e.g., uBlock Origin, SponsorBlock (or 'None')"
+      placeholder: "e.g., uBlock Origin, Return YouTube Dislike, SponsorBlock (or 'None')"
     validations:
       required: false
 
@@ -166,7 +167,7 @@ body:
         If the bug involves visual glitches, misaligned elements, overlapping badges, missing topbar icons, or incorrect modal popovers, **drag and drop a screenshot or screen recording directly into this box**. If this is a purely non-visual logic error, type "N/A - Non-visual issue".
       placeholder: "Drag and drop your screenshot/video here (or type 'N/A')..."
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: console-logs
@@ -193,3 +194,5 @@ body:
           required: true
         - label: I tested after refreshing the page or reloading the extension.
           required: true
+        - label: I've ticked the checkboxes without reading their contents.
+          required: false
