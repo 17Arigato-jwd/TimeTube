@@ -29,8 +29,8 @@ body:
     id: extension-version
     attributes:
       label: TimeTube Version
-      description: Check your browser's extension page (`chrome://extensions` or `about:addons`), e.g., v1.3.0 or commit hash.
-      placeholder: "v1.3.0"
+      description: Check your browser's extension page (`chrome://extensions` or `about:addons`), e.g., v1.3.1 or commit hash.
+      placeholder: "v1.3.1"
     validations:
       required: true
 

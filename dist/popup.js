@@ -21,16 +21,84 @@ function computeRemainingMs(state, nowMs) {
   }
   return Math.max(0, state.endsAtMs - nowMs);
 }
+function computeMaxAllowedSeconds(state, nowMs) {
+  if (state.status !== "active" && state.status !== "paused" || !state.spec) return null;
+  if (state.spec.mode === "maxLength") {
+    return Math.max(0, Math.round(state.spec.maxMinutes * 60));
+  }
+  const remainingMs = computeRemainingMs(state, nowMs);
+  if (remainingMs === null) return null;
+  const remainingSec = Math.floor(remainingMs / 1e3);
+  return Math.max(0, remainingSec - Math.max(0, state.policy.bufferSeconds));
+}
+function computeShortsStage(state, nowMs) {
+  if (state.policy.shortsMode === "redirectToWatch") {
+    return "locked_to_watch";
+  }
+  if (state.shortsLockedForSession) {
+    return "locked_to_watch";
+  }
+  if (state.status !== "active" || !state.spec || state.spec.mode === "maxLength" || state.startedAtMs === null || state.endsAtMs === null) {
+    return "unrestricted";
+  }
+  const totalMs = Math.max(1, state.endsAtMs - state.startedAtMs);
+  const remainingMs = Math.max(0, state.endsAtMs - nowMs);
+  const cutoffMs = state.policy.shortsLockCutoffMinutes * 6e4;
+  if (remainingMs <= cutoffMs) {
+    return "locked_to_watch";
+  }
+  if (remainingMs <= totalMs * 0.25) {
+    return "nudge_25";
+  }
+  if (remainingMs <= totalMs * 0.5) {
+    return "nudge_50";
+  }
+  return "unrestricted";
+}
+function buildSessionSnapshot(state, nowMs, options = {}) {
+  const snoozed = options.snoozed ?? false;
+  const autoplayObserved = options.autoplayObserved ?? "unknown";
+  const remainingMs = computeRemainingMs(state, nowMs);
+  const isTimedExpired = state.status === "active" && state.spec !== null && state.spec.mode !== "maxLength" && remainingMs !== null && remainingMs <= 0;
+  let derivedStatus;
+  if (snoozed) {
+    derivedStatus = "snoozed";
+  } else if (autoplayObserved === "enabled") {
+    derivedStatus = "needs_autoplay_setup";
+  } else if (isTimedExpired) {
+    derivedStatus = "expired";
+  } else {
+    derivedStatus = state.status;
+  }
+  const effectiveState = isTimedExpired ? { ...state, status: "expired" } : state;
+  return {
+    id: effectiveState.id,
+    status: derivedStatus,
+    spec: effectiveState.spec,
+    startedAtMs: effectiveState.startedAtMs,
+    endsAtMs: effectiveState.endsAtMs,
+    remainingMs: isTimedExpired ? 0 : remainingMs,
+    maxAllowedVideoSeconds: derivedStatus === "active" || derivedStatus === "paused" ? computeMaxAllowedSeconds(effectiveState, nowMs) : null,
+    autoplayOnboarding: effectiveState.autoplayOnboarding,
+    autoplayObserved,
+    shortsStage: computeShortsStage(effectiveState, nowMs),
+    shortsLockedForSession: effectiveState.shortsLockedForSession,
+    acknowledgedPrompts: { ...effectiveState.acknowledgedPrompts },
+    policy: { ...effectiveState.policy }
+  };
+}
 
 // src/shared/webext.ts
 var rawApi = globalThis.browser ?? globalThis.chrome;
 var webext = rawApi;
 
 // src/popup/index.ts
+var STATE_KEY = "ytTimeFitSessionState";
 var selectedMode = "countdown";
 var currentState = null;
 var statusPill = document.getElementById("status-pill");
 var activeBanner = document.getElementById("active-banner");
+var sessionSetup = document.getElementById("session-setup");
 var remainingDisplay = document.getElementById("remaining-display");
 var extendBtn = document.getElementById("extend-btn");
 var stopBtn = document.getElementById("stop-btn");
@@ -67,10 +135,12 @@ function syncActivePresetChip() {
 }
 function renderState(state) {
   currentState = state;
-  const remainingMs = computeRemainingMs(state, Date.now());
-  if (state.status === "active" || state.status === "paused") {
-    statusPill.textContent = state.status === "paused" ? "Paused" : state.spec?.mode === "maxLength" ? "Max length" : "Active";
-    statusPill.className = state.status === "paused" ? "tt-status tt-status-paused" : "tt-status tt-status-active";
+  const { status, remainingMs } = buildSessionSnapshot(state, Date.now());
+  const sessionInProgress = status === "active" || status === "paused";
+  sessionSetup.classList.toggle("hidden", sessionInProgress);
+  if (sessionInProgress) {
+    statusPill.textContent = status === "paused" ? "Paused" : state.spec?.mode === "maxLength" ? "Max length" : "Active";
+    statusPill.className = status === "paused" ? "tt-status tt-status-paused" : "tt-status tt-status-active";
     activeBanner.classList.remove("hidden");
     if (state.spec?.mode === "maxLength") {
       remainingDisplay.textContent = `\u2264 ${state.spec.maxMinutes}m`;
@@ -79,7 +149,7 @@ function renderState(state) {
       remainingDisplay.textContent = remainingMs !== null ? formatMs(remainingMs) : "--:--";
       extendBtn.classList.remove("hidden");
     }
-  } else if (state.status === "expired") {
+  } else if (status === "expired") {
     statusPill.textContent = "Time up";
     statusPill.className = "tt-status tt-status-expired";
     activeBanner.classList.remove("hidden");
@@ -98,7 +168,7 @@ function renderState(state) {
   showShortDurationsCheckbox.checked = state.policy.showShortDurationBadges;
 }
 async function syncPolicy() {
-  const next = await webext.runtime.sendMessage({
+  await webext.runtime.sendMessage({
     type: "UPDATE_POLICY",
     patch: {
       shortsMode: disableShortsCheckbox.checked ? "redirectToWatch" : "escalatingNudge",
@@ -108,13 +178,16 @@ async function syncPolicy() {
       showShortDurationBadges: showShortDurationsCheckbox.checked
     }
   });
-  renderState(next);
 }
 async function initPopup() {
+  webext.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !changes[STATE_KEY]?.newValue) return;
+    renderState(changes[STATE_KEY].newValue);
+  });
   await webext.runtime.sendMessage({ type: "WAKE_FROM_POPUP" }).catch(() => void 0);
   const state = await webext.runtime.sendMessage({ type: "GET_STATE" });
   untilInput.value = getDefaultEndTime();
-  renderState(state);
+  renderState(currentState ?? state);
   document.querySelectorAll(".tt-tab").forEach((btn) => {
     btn.addEventListener("click", () => {
       const mode = btn.dataset.mode;
@@ -139,24 +212,21 @@ async function initPopup() {
     } else {
       spec = { mode: "maxLength", maxMinutes: Math.max(1, Number(maxLengthInput.value) || 15) };
     }
-    const next = await webext.runtime.sendMessage({
+    await webext.runtime.sendMessage({
       type: "START_SESSION",
       spec
     });
-    renderState(next);
   });
   extendBtn.addEventListener("click", async () => {
-    const next = await webext.runtime.sendMessage({
+    await webext.runtime.sendMessage({
       type: "EXTEND_SESSION",
       additionalMinutes: 5
     });
-    renderState(next);
   });
   stopBtn.addEventListener("click", async () => {
-    const next = await webext.runtime.sendMessage({
+    await webext.runtime.sendMessage({
       type: "STOP_SESSION"
     });
-    renderState(next);
   });
   disableShortsCheckbox.addEventListener("change", syncPolicy);
   shortsCutoffSelect.addEventListener("change", syncPolicy);

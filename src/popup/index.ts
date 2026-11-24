@@ -1,13 +1,16 @@
 import { getDefaultEndTime } from '../core/duration';
-import { computeRemainingMs } from '../core/policy';
+import { buildSessionSnapshot } from '../core/policy';
 import { BudgetSpec, PersistedSessionState } from '../core/types';
 import { webext } from '../shared/webext';
+
+const STATE_KEY = 'ytTimeFitSessionState';
 
 let selectedMode: BudgetSpec['mode'] = 'countdown';
 let currentState: PersistedSessionState | null = null;
 
 const statusPill = document.getElementById('status-pill') as HTMLSpanElement;
 const activeBanner = document.getElementById('active-banner') as HTMLElement;
+const sessionSetup = document.getElementById('session-setup') as HTMLElement;
 const remainingDisplay = document.getElementById('remaining-display') as HTMLElement;
 const extendBtn = document.getElementById('extend-btn') as HTMLButtonElement;
 const stopBtn = document.getElementById('stop-btn') as HTMLButtonElement;
@@ -50,17 +53,19 @@ function syncActivePresetChip(): void {
 
 function renderState(state: PersistedSessionState): void {
   currentState = state;
-  const remainingMs = computeRemainingMs(state, Date.now());
+  const { status, remainingMs } = buildSessionSnapshot(state, Date.now());
+  const sessionInProgress = status === 'active' || status === 'paused';
+  sessionSetup.classList.toggle('hidden', sessionInProgress);
 
-  if (state.status === 'active' || state.status === 'paused') {
+  if (sessionInProgress) {
     statusPill.textContent =
-      state.status === 'paused'
+      status === 'paused'
         ? 'Paused'
         : state.spec?.mode === 'maxLength'
           ? 'Max length'
           : 'Active';
     statusPill.className =
-      state.status === 'paused' ? 'tt-status tt-status-paused' : 'tt-status tt-status-active';
+      status === 'paused' ? 'tt-status tt-status-paused' : 'tt-status tt-status-active';
     activeBanner.classList.remove('hidden');
 
     if (state.spec?.mode === 'maxLength') {
@@ -70,7 +75,7 @@ function renderState(state: PersistedSessionState): void {
       remainingDisplay.textContent = remainingMs !== null ? formatMs(remainingMs) : '--:--';
       extendBtn.classList.remove('hidden');
     }
-  } else if (state.status === 'expired') {
+  } else if (status === 'expired') {
     statusPill.textContent = 'Time up';
     statusPill.className = 'tt-status tt-status-expired';
     activeBanner.classList.remove('hidden');
@@ -91,7 +96,7 @@ function renderState(state: PersistedSessionState): void {
 }
 
 async function syncPolicy(): Promise<void> {
-  const next = await webext.runtime.sendMessage<PersistedSessionState>({
+  await webext.runtime.sendMessage({
     type: 'UPDATE_POLICY',
     patch: {
       shortsMode: disableShortsCheckbox.checked ? 'redirectToWatch' : 'escalatingNudge',
@@ -101,14 +106,18 @@ async function syncPolicy(): Promise<void> {
       showShortDurationBadges: showShortDurationsCheckbox.checked,
     },
   });
-  renderState(next);
 }
 
 async function initPopup(): Promise<void> {
+  webext.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes[STATE_KEY]?.newValue) return;
+    renderState(changes[STATE_KEY].newValue as PersistedSessionState);
+  });
+
   await webext.runtime.sendMessage({ type: 'WAKE_FROM_POPUP' }).catch(() => undefined);
   const state = await webext.runtime.sendMessage<PersistedSessionState>({ type: 'GET_STATE' });
   untilInput.value = getDefaultEndTime();
-  renderState(state);
+  renderState(currentState ?? state);
 
   document.querySelectorAll<HTMLButtonElement>('.tt-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -138,26 +147,23 @@ async function initPopup(): Promise<void> {
       spec = { mode: 'maxLength', maxMinutes: Math.max(1, Number(maxLengthInput.value) || 15) };
     }
 
-    const next = await webext.runtime.sendMessage<PersistedSessionState>({
+    await webext.runtime.sendMessage({
       type: 'START_SESSION',
       spec,
     });
-    renderState(next);
   });
 
   extendBtn.addEventListener('click', async () => {
-    const next = await webext.runtime.sendMessage<PersistedSessionState>({
+    await webext.runtime.sendMessage({
       type: 'EXTEND_SESSION',
       additionalMinutes: 5,
     });
-    renderState(next);
   });
 
   stopBtn.addEventListener('click', async () => {
-    const next = await webext.runtime.sendMessage<PersistedSessionState>({
+    await webext.runtime.sendMessage({
       type: 'STOP_SESSION',
     });
-    renderState(next);
   });
 
   disableShortsCheckbox.addEventListener('change', syncPolicy);
