@@ -1,0 +1,62 @@
+name: Auto Label Issue
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    name: Auto Label Issue
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply labels based on issue content
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.issue.body || '';
+            const labels = new Set();
+
+            // 1. YouTube Page Type
+            if (body.includes('Watch page (video player & sidebar recommendations)')) labels.add('page: watch');
+            if (body.includes('Home feed recommendations')) labels.add('page: home');
+            if (body.includes('Search results page')) labels.add('page: search');
+            if (body.includes('Shorts (/shorts/)') || body.includes('Shorts Controls & Guardrails')) labels.add('page: shorts');
+            if (body.includes('Top navigation bar (in-page badge / popover)') || body.includes('In-page YouTube Topbar Menu & Timer Pill')) labels.add('component: topbar');
+            if (body.includes('Extension toolbar popup') || body.includes('Extension Toolbar Popup & Settings')) labels.add('component: popup');
+            if (body.includes('Takeover screen (Time\'s up)') || body.includes('Takeover Screen & Lifecycle Management')) labels.add('component: takeover');
+            if (body.includes('Global / across all pages')) labels.add('page: global');
+
+            // 2. Installation Source
+            if (body.includes('Firefox Add-ons Store (AMO)')) labels.add('store: firefox');
+            if (body.includes('Opera Addons Store')) labels.add('store: opera');
+            if (body.includes('Chrome Web Store')) labels.add('store: chrome');
+            if (body.includes('Microsoft Edge Add-ons')) labels.add('store: edge');
+
+            // 3. Browser Family
+            if (body.includes('Mozilla Firefox (Desktop)') || body.includes('Mozilla Firefox (Android)')) labels.add('browser: firefox');
+            if (body.includes('Opera GX') || body.includes('Opera')) labels.add('browser: opera');
+            if (body.includes('Google Chrome')) labels.add('browser: chrome');
+            if (body.includes('Brave Browser')) labels.add('browser: brave');
+            if (body.includes('Microsoft Edge')) labels.add('browser: edge');
+
+            // 4. Honeypot / trap checklist verification (case-insensitive [x] or [X])
+            const honeypotRegex = /- \[[xX]\] I've ticked the checkboxes without reading their contents\./;
+            if (honeypotRegex.test(body)) {
+              labels.add('invalid / unread-checklist');
+            }
+
+            const labelsToAdd = Array.from(labels);
+            if (labelsToAdd.length > 0) {
+              console.log(`Adding labels to issue #${context.issue.number}:`, labelsToAdd);
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: labelsToAdd
+              });
+            } else {
+              console.log(`No matching labels found for issue #${context.issue.number}.`);
+            }
