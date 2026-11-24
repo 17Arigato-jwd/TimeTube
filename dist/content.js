@@ -1718,11 +1718,11 @@
     nudgeInfiniteScrollIfSparse(visibleRegularCount);
   }
   function syncHoverPreviewPolicy() {
-    const enabled = window.location.hostname === "www.youtube.com" && persistedState.policy.disableHoverPreviews;
+    const enabled = persistedState.policy.disableHoverPreviews;
     if (enabled) {
       document.documentElement.setAttribute("data-timetube-disable-hover-previews", "true");
       document.querySelectorAll(
-        "#video-preview video, ytd-thumbnail:hover ytd-moving-thumbnail-renderer video, ytd-thumbnail:hover ytd-video-preview video"
+        "#video-preview video, ytd-moving-thumbnail-renderer video, ytd-video-preview video, ytd-thumbnail video"
       ).forEach((video) => {
         if (!video.paused) video.pause();
       });
@@ -1734,11 +1734,13 @@
     document.addEventListener(
       "play",
       (event) => {
-        if (window.location.hostname !== "www.youtube.com" || !persistedState.policy.disableHoverPreviews) {
+        if (!persistedState.policy.disableHoverPreviews) {
           return;
         }
         const target = event.target;
-        if (target instanceof HTMLVideoElement && target.closest("#video-preview, ytd-moving-thumbnail-renderer, ytd-video-preview")) {
+        if (target instanceof HTMLVideoElement && !target.closest("#movie_player, #player") && target.closest(
+          "#video-preview, ytd-moving-thumbnail-renderer, ytd-video-preview, animated-thumbnail-overlay-view-model, ytd-thumbnail, yt-thumbnail-view-model"
+        )) {
           target.pause();
         }
       },
@@ -1843,7 +1845,14 @@
       runFullSweep();
     });
     webext.runtime.onMessage.addListener((msg) => {
-      if (msg && typeof msg === "object" && msg.type === "WAKE_FROM_POPUP") {
+      if (!msg || typeof msg !== "object") return;
+      const type = msg.type;
+      if (type === "POLICY_UPDATED" && "state" in msg) {
+        persistedState = msg.state;
+        runFullSweep();
+        return;
+      }
+      if (type === "WAKE_FROM_POPUP") {
         snoozedUntilReloadOrPopup = false;
         checkAutoplayWhilePlaying();
         runFullSweep();

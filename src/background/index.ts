@@ -245,6 +245,21 @@ async function wakeAllYouTubeTabs(): Promise<void> {
   }
 }
 
+async function notifyYouTubeTabsOfPolicyUpdate(state: PersistedSessionState): Promise<void> {
+  try {
+    const tabs = await webext.tabs.query({
+      url: ['https://www.youtube.com/*', 'https://m.youtube.com/*'],
+    });
+    await Promise.allSettled(
+      tabs
+        .filter((t): t is { id: number } => typeof t.id === 'number')
+        .map((t) => webext.tabs.sendMessage(t.id, { type: 'POLICY_UPDATED', state })),
+    );
+  } catch {
+    // The preference is already persisted; tabs that cannot receive messages will sync on reload.
+  }
+}
+
 async function handleMessage(msg: RuntimeMessage): Promise<unknown> {
   const state = await loadState();
   const nowMs = Date.now();
@@ -406,6 +421,7 @@ async function handleMessage(msg: RuntimeMessage): Promise<unknown> {
         policy: { ...state.policy, ...msg.patch },
       };
       await saveState(next);
+      await notifyYouTubeTabsOfPolicyUpdate(next);
       return next;
     }
 

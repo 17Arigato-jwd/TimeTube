@@ -140,6 +140,7 @@ export type RuntimeMessage =
   | { type: 'RESUME_TIMER' }
   | { type: 'STOP_SESSION' }
   | { type: 'UPDATE_POLICY'; patch: Partial<FilterPolicy> }
+  | { type: 'POLICY_UPDATED'; state: PersistedSessionState }
   | { type: 'SET_AUTOPLAY_ONBOARDING'; state: AutoplayOnboardingState }
   | { type: 'ACK_SHORTS_PROMPT'; stage: 'nudge_50' | 'nudge_25' }
   | { type: 'LOCK_SHORTS_FOR_SESSION' }
