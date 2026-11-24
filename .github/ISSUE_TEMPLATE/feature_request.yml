@@ -22,7 +22,7 @@ body:
         - Takeover Screen & Lifecycle Management
         - Extension Toolbar Popup & Settings
         - Cross-browser Support
-        - Other
+        - Other / Multiple Areas
     validations:
       required: true
 
@@ -64,3 +64,18 @@ body:
         - "No, I am only proposing the feature"
     validations:
       required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please verify these items before submitting your feature request.
+      options:
+        - label: I searched open and closed feature requests and confirmed this is not a duplicate.
+          required: true
+        - label: This feature aligns with TimeTube's focus on digital wellbeing and session productivity.
+          required: true
+        - label: I have provided a clear explanation of the use case and expected behavior.
+          required: true
+        - label: I've ticked the checkboxes without reading their contents.
+          required: false
