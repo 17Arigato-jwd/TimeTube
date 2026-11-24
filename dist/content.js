@@ -1,68 +1,5 @@
 "use strict";
 (() => {
-  // src/core/duration.ts
-  function parseDurationText(raw) {
-    if (!raw) return null;
-    const cleaned = raw.trim();
-    if (!cleaned) return null;
-    const colonMatch = cleaned.match(/\b(\d{1,2}:)?(\d{1,2}):(\d{2})\b/);
-    if (colonMatch) {
-      const parts = colonMatch[0].split(":").map((p) => Number.parseInt(p, 10));
-      if (parts.some((n) => Number.isNaN(n))) return null;
-      if (parts.length === 2) {
-        return (parts[0] ?? 0) * 60 + (parts[1] ?? 0);
-      }
-      if (parts.length === 3) {
-        return (parts[0] ?? 0) * 3600 + (parts[1] ?? 0) * 60 + (parts[2] ?? 0);
-      }
-    }
-    const hoursMatch = cleaned.match(/(\d+)\s+hours?\b(?!\s+ago\b)/i);
-    const minsMatch = cleaned.match(/(\d+)\s+minutes?\b(?!\s+ago\b)/i);
-    const secsMatch = cleaned.match(/(\d+)\s+seconds?\b(?!\s+ago\b)/i);
-    if (hoursMatch || minsMatch || secsMatch) {
-      const h = hoursMatch ? Number.parseInt(hoursMatch[1] ?? "0", 10) : 0;
-      const m = minsMatch ? Number.parseInt(minsMatch[1] ?? "0", 10) : 0;
-      const s = secsMatch ? Number.parseInt(secsMatch[1] ?? "0", 10) : 0;
-      return h * 3600 + m * 60 + s;
-    }
-    return null;
-  }
-  function formatDurationBadge(totalSeconds) {
-    const safe = Math.max(0, Math.round(totalSeconds));
-    const hours = Math.floor(safe / 3600);
-    const minutes = Math.floor(safe % 3600 / 60);
-    const seconds = safe % 60;
-    const pad = (n) => String(n).padStart(2, "0");
-    if (hours > 0) {
-      return `${hours}:${pad(minutes)}:${pad(seconds)}`;
-    }
-    return `${minutes}:${pad(seconds)}`;
-  }
-  function formatApproxRemaining(remainingMs) {
-    const totalSec = Math.max(0, Math.ceil(remainingMs / 1e3));
-    if (totalSec === 0) return "0s";
-    if (totalSec < 60) return `${totalSec}s`;
-    const totalMin = totalSec / 60;
-    if (totalMin < 59.5) {
-      return `${Math.max(1, Math.round(totalMin))}m`;
-    }
-    const halfHours = Math.round(totalSec / 3600 * 2) / 2;
-    const formatted = Number.isInteger(halfHours) ? String(halfHours) : halfHours.toFixed(1);
-    return `${formatted}hr`;
-  }
-  function extractShortIdFromHref(href) {
-    const match = href.match(/\/shorts\/([a-zA-Z0-9_-]{6,})/);
-    return match?.[1] ?? null;
-  }
-  function getDefaultEndTime(nowMs = Date.now()) {
-    const d = new Date(nowMs);
-    const totalMinutes = d.getHours() * 60 + d.getMinutes();
-    const nextQuarter = (Math.floor(totalMinutes / 15) + 1) * 15 % (24 * 60);
-    const hh = String(Math.floor(nextQuarter / 60)).padStart(2, "0");
-    const mm = String(nextQuarter % 60).padStart(2, "0");
-    return `${hh}:${mm}`;
-  }
-
   // src/core/policy.ts
   function computeRemainingMs(state, nowMs) {
     if (!state.spec || state.spec.mode === "maxLength") {
@@ -201,6 +138,119 @@
     return base;
   }
 
+  // src/core/schedule.ts
+  var SCHEDULE_KEY = "timeTubeSchedule";
+  var MINUTE_MS = 6e4;
+  var EMPTY_SCHEDULE = { enabled: false, rules: [], usage: {} };
+  function dateKey(date) {
+    return [date.getFullYear(), date.getMonth() + 1, date.getDate()].map((part) => String(part).padStart(2, "0")).join("-");
+  }
+  function atTime(day, time, nextDay = false) {
+    const [hour = 0, minute = 0] = time.split(":").map(Number);
+    return new Date(day.getFullYear(), day.getMonth(), day.getDate() + Number(nextDay), hour, minute).getTime();
+  }
+  function occurrences(state, now, lastOffset) {
+    const date = new Date(now);
+    const windows = [];
+    for (let offset = -2; offset <= lastOffset; offset++) {
+      const day = new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset);
+      const rule = state.rules.find((item) => item.days.includes(day.getDay()));
+      if (!rule) continue;
+      const key = dateKey(day);
+      const exception = state.usage[key]?.extra;
+      const opensAt = atTime(day, rule.start);
+      const closesAt = Math.max(atTime(day, rule.end, rule.end < rule.start), exception?.closesAt ?? 0);
+      windows.push({ key, rule, opensAt, closesAt, limitMs: Math.max(rule.limitMinutes * MINUTE_MS, exception?.limitMs ?? 0) });
+    }
+    return windows;
+  }
+  function getScheduleStatus(state, now) {
+    if (!state.enabled) return { kind: "off" };
+    const today = dateKey(new Date(now));
+    const windows = occurrences(state, now, 7);
+    const open = windows.filter((window2) => window2.opensAt <= now && now < window2.closesAt);
+    for (const window2 of open) {
+      const remainingMs = window2.limitMs - (state.usage[window2.key]?.usedMs ?? 0);
+      if (remainingMs > 0) return { kind: "open", ...window2, remainingMs };
+    }
+    if (!open.length && !windows.some((window2) => window2.key === today)) return { kind: "unassigned" };
+    const candidates = windows.flatMap(({ opensAt, closesAt }) => [opensAt, closesAt]);
+    const date = new Date(now);
+    for (let offset = 1; offset <= 7; offset++) {
+      candidates.push(new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset).getTime());
+    }
+    const nextOpen = candidates.filter((time) => time > now).sort((a, b) => a - b).find((time) => {
+      const current = windows.filter(({ opensAt, closesAt }) => opensAt <= time && time < closesAt);
+      if (current.length) return current.some(({ key, limitMs }) => (state.usage[key]?.usedMs ?? 0) < limitMs);
+      const day = dateKey(new Date(time));
+      return !windows.some((window2) => window2.key === day);
+    }) ?? null;
+    return { kind: open.length ? "spent" : "closed", nextOpen };
+  }
+
+  // src/core/duration.ts
+  function parseDurationText(raw) {
+    if (!raw) return null;
+    const cleaned = raw.trim();
+    if (!cleaned) return null;
+    const colonMatch = cleaned.match(/\b(\d{1,2}:)?(\d{1,2}):(\d{2})\b/);
+    if (colonMatch) {
+      const parts = colonMatch[0].split(":").map((p) => Number.parseInt(p, 10));
+      if (parts.some((n) => Number.isNaN(n))) return null;
+      if (parts.length === 2) {
+        return (parts[0] ?? 0) * 60 + (parts[1] ?? 0);
+      }
+      if (parts.length === 3) {
+        return (parts[0] ?? 0) * 3600 + (parts[1] ?? 0) * 60 + (parts[2] ?? 0);
+      }
+    }
+    const hoursMatch = cleaned.match(/(\d+)\s+hours?\b(?!\s+ago\b)/i);
+    const minsMatch = cleaned.match(/(\d+)\s+minutes?\b(?!\s+ago\b)/i);
+    const secsMatch = cleaned.match(/(\d+)\s+seconds?\b(?!\s+ago\b)/i);
+    if (hoursMatch || minsMatch || secsMatch) {
+      const h = hoursMatch ? Number.parseInt(hoursMatch[1] ?? "0", 10) : 0;
+      const m = minsMatch ? Number.parseInt(minsMatch[1] ?? "0", 10) : 0;
+      const s = secsMatch ? Number.parseInt(secsMatch[1] ?? "0", 10) : 0;
+      return h * 3600 + m * 60 + s;
+    }
+    return null;
+  }
+  function formatDurationBadge(totalSeconds) {
+    const safe = Math.max(0, Math.round(totalSeconds));
+    const hours = Math.floor(safe / 3600);
+    const minutes = Math.floor(safe % 3600 / 60);
+    const seconds = safe % 60;
+    const pad = (n) => String(n).padStart(2, "0");
+    if (hours > 0) {
+      return `${hours}:${pad(minutes)}:${pad(seconds)}`;
+    }
+    return `${minutes}:${pad(seconds)}`;
+  }
+  function formatApproxRemaining(remainingMs) {
+    const totalSec = Math.max(0, Math.ceil(remainingMs / 1e3));
+    if (totalSec === 0) return "0s";
+    if (totalSec < 60) return `${totalSec}s`;
+    const totalMin = totalSec / 60;
+    if (totalMin < 59.5) {
+      return `${Math.max(1, Math.round(totalMin))}m`;
+    }
+    const halfHours = Math.round(totalSec / 3600 * 2) / 2;
+    const formatted = Number.isInteger(halfHours) ? String(halfHours) : halfHours.toFixed(1);
+    return `${formatted}hr`;
+  }
+  function extractShortIdFromHref(href) {
+    const match = href.match(/\/shorts\/([a-zA-Z0-9_-]{6,})/);
+    return match?.[1] ?? null;
+  }
+  function getDefaultEndTime(nowMs = Date.now()) {
+    const d = new Date(nowMs);
+    const totalMinutes = d.getHours() * 60 + d.getMinutes();
+    const nextQuarter = (Math.floor(totalMinutes / 15) + 1) * 15 % (24 * 60);
+    const hh = String(Math.floor(nextQuarter / 60)).padStart(2, "0");
+    const mm = String(nextQuarter % 60).padStart(2, "0");
+    return `${hh}:${mm}`;
+  }
+
   // src/core/types.ts
   var DEFAULT_POLICY = {
     shortsMode: "escalatingNudge",
@@ -329,7 +379,8 @@
         </label>
       </div>
 
-      <button id="yt-tt-start" type="button" class="yt-tt-pill-btn yt-tt-pill-primary yt-tt-full">Start session</button>
+      <button id="yt-tt-start" aria-describedby="yt-tt-start-message" type="button" class="yt-tt-pill-btn yt-tt-pill-primary yt-tt-full">Start session</button>
+      <p id="yt-tt-start-message" role="status" hidden></p>
     </div>
 
     <div class="yt-tt-divider" role="separator"></div>
@@ -436,11 +487,23 @@
       } else {
         spec = { mode: "maxLength", maxMinutes: Math.max(1, maxVal) };
       }
-      const next = await webext.runtime.sendMessage({
-        type: "START_SESSION",
-        spec
-      });
-      onStateChange(next);
+      const status = pop.querySelector("#yt-tt-start-message");
+      status.hidden = true;
+      try {
+        const result = await webext.runtime.sendMessage({
+          type: "START_SCHEDULED_SESSION",
+          spec
+        });
+        if ("error" in result) throw new Error(result.error);
+        if (result.kind === "start") {
+          onStateChange(result.state);
+          return;
+        }
+        status.textContent = result.kind === "conflict" ? "This session exceeds your schedule. Open the TimeTube toolbar popup to shorten it or add extra time." : "Your schedule is restricting access.";
+      } catch {
+        status.textContent = "Could not start the session. Try again.";
+      }
+      status.hidden = false;
     });
     pop.querySelector("#yt-tt-extend")?.addEventListener("click", async () => {
       const next = await webext.runtime.sendMessage({
@@ -700,11 +763,32 @@
   var mutationDebounceTimer = null;
   var lastScrollNudgeMs = 0;
   var consecutiveScrollNudges = 0;
+  var schedule = EMPTY_SCHEDULE;
+  var scheduleDocumentId = crypto.randomUUID();
+  var scheduleBlocked = false;
+  var scheduleHeartbeat = null;
+  var lastScheduleSampleAt = 0;
+  function scheduleRestrictsAccess() {
+    const { kind } = getScheduleStatus(schedule, Date.now());
+    return kind === "closed" || kind === "spent";
+  }
+  function publishScheduleSample() {
+    if (!schedule.enabled) return;
+    lastScheduleSampleAt = Date.now();
+    const video = getActivePlayerVideo();
+    webext.runtime.sendMessage({
+      type: "SCHEDULE_SAMPLE",
+      documentId: scheduleDocumentId,
+      visible: !document.hidden && !expiredScreenRendered,
+      playing: Boolean(video && !video.paused && !video.ended && !video.seeking && video.readyState >= 3)
+    }).catch(() => void 0);
+  }
   function getCurrentSnapshot() {
-    return buildSessionSnapshot(persistedState, Date.now(), {
+    const snapshot = buildSessionSnapshot(persistedState, Date.now(), {
       snoozed: snoozedUntilReloadOrPopup,
       autoplayObserved
     });
+    return scheduleRestrictsAccess() ? { ...snapshot, status: "expired", remainingMs: 0, maxAllowedVideoSeconds: null } : snapshot;
   }
   function isWatchPage() {
     return window.location.pathname === "/watch";
@@ -1195,7 +1279,7 @@
     const title = document.createElement("h1");
     title.textContent = "Time's up :)";
     const message = document.createElement("p");
-    message.textContent = "Your YouTube break has ended. You can start a new session or stop the timer from the TimeTube extension menu whenever you are ready.";
+    message.textContent = scheduleBlocked ? "Your YouTube schedule is restricting access. Open TimeTube to see when you can watch again." : "Your YouTube break has ended. You can start a new session or stop the timer from the TimeTube extension menu whenever you are ready.";
     card.appendChild(title);
     card.appendChild(message);
     screen.appendChild(card);
@@ -1585,11 +1669,21 @@
         variant: "primary",
         onClick: async () => {
           removeModal();
-          persistedState = await webext.runtime.sendMessage({
-            type: "START_SESSION",
+          const result = await webext.runtime.sendMessage({
+            type: "START_SCHEDULED_SESSION",
             spec: lastSpec
-          });
-          runFullSweep();
+          }).catch(() => null);
+          if (result?.kind === "start") {
+            persistedState = result.state;
+            runFullSweep();
+          } else {
+            showModal(
+              "repeat_schedule_conflict",
+              "Session could not start",
+              result?.kind === "conflict" ? "Open the TimeTube toolbar popup to shorten the session or add extra time." : "Open the TimeTube toolbar popup to check your schedule and try again.",
+              [{ label: "Close", variant: "secondary", onClick: removeModal }]
+            );
+          }
         }
       });
     }
@@ -1617,12 +1711,13 @@
     showModal("last_expired_notice", "Your last break ended", summary, actions);
   }
   function runFullSweep() {
+    scheduleBlocked = scheduleRestrictsAccess();
     const snapshot = getCurrentSnapshot();
     if (expiredScreenRendered && snapshot.status !== "expired") {
       window.location.reload();
       return;
     }
-    if (!snoozedUntilReloadOrPopup && snapshot.status === "expired") {
+    if (snapshot.status === "expired" && (scheduleBlocked || !snoozedUntilReloadOrPopup)) {
       renderExpiredTakeover();
       return;
     }
@@ -1735,6 +1830,8 @@
     } catch {
       persistedState = { ...INITIAL_PERSISTED_STATE };
     }
+    const storedSchedule = await webext.storage.local.get(SCHEDULE_KEY).catch(() => ({}));
+    schedule = storedSchedule[SCHEDULE_KEY] ?? EMPTY_SCHEDULE;
     attachModalInputBlocker();
     attachShortClickInterceptor();
     attachDocumentMediaListeners();
@@ -1792,10 +1889,35 @@
       }
     }, 1e3);
     webext.storage.onChanged.addListener((changes, area) => {
-      if (area !== "local" || !changes[STATE_KEY]?.newValue) return;
-      persistedState = changes[STATE_KEY].newValue;
-      runFullSweep();
+      if (area !== "local") return;
+      if (changes[SCHEDULE_KEY]) {
+        const wasEnabled = schedule.enabled;
+        schedule = changes[SCHEDULE_KEY].newValue ?? EMPTY_SCHEDULE;
+        if (schedule.enabled && !wasEnabled) publishScheduleSample();
+        if (scheduleRestrictsAccess() !== scheduleBlocked) runFullSweep();
+      }
+      if (changes[STATE_KEY]?.newValue) {
+        persistedState = changes[STATE_KEY].newValue;
+        runFullSweep();
+      }
     });
+    const refreshSchedule = () => {
+      if (scheduleRestrictsAccess() !== scheduleBlocked) runFullSweep();
+      publishScheduleSample();
+    };
+    refreshSchedule();
+    scheduleHeartbeat = window.setInterval(refreshSchedule, 1e3);
+    document.addEventListener("visibilitychange", refreshSchedule);
+    document.addEventListener("timeupdate", (event) => {
+      if (event.target === getActivePlayerVideo() && Date.now() - lastScheduleSampleAt >= 1e3) {
+        refreshSchedule();
+      }
+    }, true);
+    for (const event of ["playing", "pause", "waiting", "seeking", "seeked", "ended"]) {
+      document.addEventListener(event, (event2) => {
+        if (event2.target instanceof HTMLVideoElement) publishScheduleSample();
+      }, true);
+    }
     webext.runtime.onMessage.addListener((msg) => {
       if (msg && typeof msg === "object" && msg.type === "WAKE_FROM_POPUP") {
         snoozedUntilReloadOrPopup = false;
@@ -1803,7 +1925,13 @@
         runFullSweep();
       }
     });
-    window.addEventListener("pagehide", () => {
+    window.addEventListener("pageshow", (event) => {
+      if (event.persisted) refreshSchedule();
+    });
+    window.addEventListener("pagehide", (event) => {
+      publishScheduleSample();
+      if (event.persisted) return;
+      if (scheduleHeartbeat !== null) window.clearInterval(scheduleHeartbeat);
       if (sweepTimer !== null) window.clearInterval(sweepTimer);
       if (topbarTickInterval !== null) window.clearInterval(topbarTickInterval);
       if (exactExpiryTimer !== null) window.clearTimeout(exactExpiryTimer);

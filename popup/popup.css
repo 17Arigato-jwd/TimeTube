@@ -411,3 +411,54 @@ body {
 .hidden {
   display: none !important;
 }
+
+.tt-schedule {
+  border-bottom: 1px solid var(--tt-border);
+}
+
+.tt-schedule > button {
+  align-self: flex-start;
+}
+
+.tt-field-error {
+  color: var(--tt-red-text);
+}
+
+#session-start-error {
+  margin: 0 16px 12px;
+}
+
+.tt-conflict {
+  width: min(320px, calc(100% - 24px));
+  box-sizing: border-box;
+  padding: 16px;
+  border: 1px solid var(--tt-border);
+  border-radius: 14px;
+  background: var(--tt-bg-elevated);
+  color: inherit;
+}
+
+.tt-conflict:modal {
+  overscroll-behavior: contain;
+}
+
+.tt-conflict::backdrop {
+  overflow: hidden;
+  background: rgb(0 0 0 / 65%);
+}
+
+.tt-conflict h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.tt-conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tt-conflict button:disabled {
+  cursor: default;
+  opacity: .55;
+}

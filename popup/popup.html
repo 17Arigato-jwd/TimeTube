@@ -27,6 +27,15 @@
       </div>
     </section>
 
+    <section class="tt-section tt-schedule" aria-labelledby="schedule-heading">
+      <h2 id="schedule-heading" class="tt-section-label">Today’s schedule</h2>
+      <div>
+        <strong id="schedule-status">Loading schedule…</strong>
+        <div id="schedule-detail" class="tt-caption"></div>
+      </div>
+      <button id="schedule-open" type="button" class="tt-pill-btn tt-pill-tonal">Set up schedule</button>
+    </section>
+
     <div id="session-setup" class="hidden">
       <section class="tt-section">
         <div class="tt-tabs" role="tablist">
@@ -65,6 +74,8 @@
       </section>
       <div class="tt-divider" role="separator"></div>
     </div>
+
+    <p id="session-start-error" class="tt-field-error hidden" role="alert"></p>
 
     <section class="tt-section tt-settings">
       <h2 class="tt-section-label">Playback &amp; Shorts</h2>
@@ -110,6 +121,18 @@
       </label>
     </section>
   </main>
+
+  <dialog id="schedule-conflict" class="tt-conflict" aria-labelledby="conflict-title" aria-describedby="conflict-summary">
+    <h2 id="conflict-title">Session exceeds your schedule</h2>
+    <p id="conflict-summary"></p>
+    <p id="conflict-extra"></p>
+    <p id="conflict-error" class="tt-field-error" role="alert"></p>
+    <div class="tt-conflict-actions">
+      <button id="conflict-shorten" type="button" class="tt-pill-btn tt-pill-primary">Shorten session</button>
+      <button id="conflict-extend" type="button" class="tt-pill-btn tt-pill-tonal">Add extra time</button>
+      <form method="dialog"><button type="submit" class="tt-pill-btn tt-pill-tonal" autofocus>Cancel</button></form>
+    </div>
+  </dialog>
 
   <script type="module" src="../dist/popup.js"></script>
 </body>

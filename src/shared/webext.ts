@@ -44,6 +44,7 @@ export interface WebExtApi {
   };
   runtime: {
     getURL(path: string): string;
+    openOptionsPage(): Promise<void>;
     sendMessage<T = unknown>(message: unknown): Promise<T>;
     onMessage: {
       addListener(

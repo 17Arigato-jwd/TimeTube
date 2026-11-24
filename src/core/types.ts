@@ -1,3 +1,5 @@
+import type { ScheduleChoice, ScheduleRule } from './schedule';
+
 export type BudgetSpec =
   | { mode: 'countdown'; durationMinutes: number }
   | { mode: 'until'; endTime: string } // Local 24-hour "HH:MM"
@@ -131,7 +133,9 @@ export const INITIAL_PERSISTED_STATE: PersistedSessionState = {
 
 export type RuntimeMessage =
   | { type: 'GET_STATE' }
-  | { type: 'START_SESSION'; spec: BudgetSpec; policyOverrides?: Partial<FilterPolicy> }
+  | { type: 'SAVE_SCHEDULE'; enabled: boolean; rules: ScheduleRule[] }
+  | { type: 'SCHEDULE_SAMPLE'; documentId: string; visible: boolean; playing: boolean }
+  | { type: 'START_SCHEDULED_SESSION'; spec: BudgetSpec; choice?: ScheduleChoice }
   | { type: 'EXTEND_SESSION'; additionalMinutes: number }
   | { type: 'EXTEND_SESSION_SECONDS'; additionalSeconds: number }
   | { type: 'PAUSE_TIMER' }

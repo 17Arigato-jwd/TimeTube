@@ -8,7 +8,7 @@
 [![Manifest V3](https://img.shields.io/badge/Manifest-V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![Cross-Browser](https://img.shields.io/badge/Browser-Chrome%20%7C%20Firefox%20%7C%20Edge%20%7C%20Brave-orange.svg)]()
 [![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6.svg)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/Tests-Passing%20(12%2F12)-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-Passing%20(20%2F20)-brightgreen.svg)]()
 [![Version](https://img.shields.io/badge/Version-v1.3.1-purple.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -30,6 +30,7 @@ Originally developed as **TimeFit**, **TimeTube** has evolved into a complete, i
   - [5. Smart Shorts and Navigation Guardrails](#5-smart-shorts-and-navigation-guardrails)
   - [6. Silent Autoplay Verification](#6-silent-autoplay-verification)
   - [7. Clean Takeover and Lifecycle Auto-Reset](#7-clean-takeover-and-lifecycle-auto-reset)
+  - [8. Weekly YouTube Schedules](#8-weekly-youtube-schedules)
 - [Installation Guide](#installation-guide)
   - [Official Web Stores](#official-web-stores)
   - [Step 1: Download or Clone the Repository](#step-1-download-or-clone-the-repository)
@@ -94,6 +95,18 @@ Originally developed as **TimeFit**, **TimeTube** has evolved into a complete, i
 ### 7. Clean Takeover and Lifecycle Auto-Reset
 - **Clean Takeover:** When the timer hits zero, TimeTube smoothly cleans up the active page, stops playback, and redirects to `youtube.com/` with a friendly "Time's up :)" message.
 - **10-Second Cooldown Auto-Reset:** Monitors tab lifecycle. When you close all YouTube tabs for at least 10 seconds after a session expires, TimeTube automatically resets itself so your next visit starts fresh.
+
+### 8. Weekly YouTube Schedules
+
+1. Open TimeTube from the browser toolbar and select **Set up schedule**.
+2. Select **Add rule**. Pick individual days or use **Every day**, **Weekdays**, or **Weekends**. Each day can belong to one rule.
+3. Set the start time, end time, and daily limit. Times use your device's local time. An end time earlier than the start time means the window ends the next day.
+4. Choose **Time on YouTube** to count time while a YouTube tab is visible, or **Active playback** to stop counting when playback pauses. Simultaneous use in multiple tabs counts once.
+5. Select **Apply rule**, then turn on **Enable schedule** and select **Save schedule**. Use **Edit schedule** to return later. Turning the schedule off preserves saved rules.
+
+The popup shows the remaining allowance and closing time during an open window. When a window is closed or its allowance runs out, TimeTube stops playback and shows its **Time up** screen. The popup shows when access resumes. Days without a rule allow normal YouTube use.
+
+You can still use **Timer**, **End time**, and **Max length** when the schedule allows access. If a Timer or End time session would exceed the remaining allowance or run past closing, the toolbar popup offers **Shorten session** or **Add extra time**. Extra time applies only to that occurrence. Stopping a manual session or letting it auto-reset leaves the schedule in effect.
 
 ---
 
@@ -216,25 +229,29 @@ Timetube/
 │   ├── core/                # Pure domain logic (zero DOM dependencies, 100% testable)
 │   │   ├── duration.ts      # YouTube duration badge & ARIA label parser
 │   │   ├── policy.ts        # Budget resolution, pruning rules, overrun logic, tab lifecycle
+│   │   ├── schedule.ts      # Weekly windows, usage accounting, and conflict decisions
 │   │   └── types.ts         # Shared state interfaces, message contracts, action schemas
 │   ├── content/             # In-page scripts running on youtube.com
 │   │   ├── index.ts         # Mutation observer, sidebar pruner, takeover screens, video guards
 │   │   ├── topbar.ts        # Header injection, popover controller, real-time badge updates
 │   │   └── styles.css       # Scoped stylesheet with design tokens for YouTube integration
 │   ├── background/          # Background Service Worker
-│   │   └── index.ts         # Alarms, tab tracking, cross-tab state broadcast, storage sync
+│   │   ├── index.ts         # Alarms, tab tracking, cross-tab state broadcast, storage sync
+│   │   └── schedule.ts      # Schedule persistence and usage samples from YouTube tabs
+│   ├── options/             # Weekly schedule settings controller
 │   ├── popup/               # Browser action popup UI
 │   │   ├── index.ts         # Controller for extension toolbar popup
-│   │   ├── popup.html       # Popup layout
-│   │   └── popup.css        # Popup styling
+│   │   └── schedule.ts      # Schedule status and manual-session conflict dialog
 │   └── shared/              # Shared utilities
 │       └── webext.ts        # Unified cross-browser runtime & storage polyfill
+├── popup/                   # Toolbar popup and schedule settings HTML and CSS
 ├── scripts/
 │   ├── build.mjs            # Production bundle pipeline with esbuild
 │   └── build-tests.mjs      # Test suite bundling pipeline
 ├── dist/                    # Bundled extension outputs
 └── tests/                   # Node.js native test suite
-    └── policy.test.ts       # 12 comprehensive unit test scenarios
+    ├── policy.test.ts       # Timer, playback, and filtering behavior
+    └── schedule.test.ts     # Weekly windows, usage, and manual-session conflicts
 ```
 
 ---
@@ -282,6 +299,8 @@ The test suite validates:
 - [x] Overrun calculations (dynamic playback speed <= 2x and cutoff percentages)
 - [x] Paused countdown state persistence
 - [x] YouTube tab closure lifecycle tracking & 10s cooldown auto-reset
+- [x] Weekly access windows, overnight rollover, and the next available access time
+- [x] Daily usage across tabs, allowance exhaustion, and one-time exceptions
 
 ---
 
@@ -479,7 +498,7 @@ When completing the [Feature Request form](https://github.com/17Arigato-jwd/Time
 
 ## Permissions Justification
 
-- **`storage`**: Persists your active budget, timer countdown, and preferences across tabs and browser restarts.
+- **`storage`**: Persists your active budget, timer countdown, preferences, weekly schedule, and usage totals across tabs and browser restarts.
 - **`alarms`**: Powers accurate background countdown ticks and scheduled expiration checks in Manifest V3.
 - **Host Permissions (`*://*.youtube.com/*`)**: Injects content scripts, displays the topbar menu, and filters unfinishable video recommendations.
 

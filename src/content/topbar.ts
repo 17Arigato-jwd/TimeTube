@@ -1,3 +1,4 @@
+import type { ScheduledStartResponse } from '../core/schedule';
 import { formatApproxRemaining, getDefaultEndTime } from '../core/duration';
 import { computeRemainingMs } from '../core/policy';
 import { BudgetSpec, PersistedSessionState } from '../core/types';
@@ -107,7 +108,8 @@ function buildPopover(onStateChange: (next: PersistedSessionState) => void): HTM
         </label>
       </div>
 
-      <button id="yt-tt-start" type="button" class="yt-tt-pill-btn yt-tt-pill-primary yt-tt-full">Start session</button>
+      <button id="yt-tt-start" aria-describedby="yt-tt-start-message" type="button" class="yt-tt-pill-btn yt-tt-pill-primary yt-tt-full">Start session</button>
+      <p id="yt-tt-start-message" role="status" hidden></p>
     </div>
 
     <div class="yt-tt-divider" role="separator"></div>
@@ -220,11 +222,25 @@ function buildPopover(onStateChange: (next: PersistedSessionState) => void): HTM
       spec = { mode: 'maxLength', maxMinutes: Math.max(1, maxVal) };
     }
 
-    const next = await webext.runtime.sendMessage<PersistedSessionState>({
-      type: 'START_SESSION',
-      spec,
-    });
-    onStateChange(next);
+    const status = pop.querySelector<HTMLElement>('#yt-tt-start-message')!;
+    status.hidden = true;
+    try {
+      const result = await webext.runtime.sendMessage<ScheduledStartResponse | { error: string }>({
+        type: 'START_SCHEDULED_SESSION',
+        spec,
+      });
+      if ('error' in result) throw new Error(result.error);
+      if (result.kind === 'start') {
+        onStateChange(result.state);
+        return;
+      }
+      status.textContent = result.kind === 'conflict'
+        ? 'This session exceeds your schedule. Open the TimeTube toolbar popup to shorten it or add extra time.'
+        : 'Your schedule is restricting access.';
+    } catch {
+      status.textContent = 'Could not start the session. Try again.';
+    }
+    status.hidden = false;
   });
 
   pop.querySelector<HTMLButtonElement>('#yt-tt-extend')?.addEventListener('click', async () => {
