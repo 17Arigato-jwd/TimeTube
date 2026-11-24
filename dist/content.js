@@ -207,6 +207,7 @@
     shortsLockCutoffMinutes: 5,
     hideShortsNavButton: true,
     showShortDurationBadges: true,
+    disableHoverPreviews: false,
     livestreams: "hide",
     unknownDuration: "hide",
     exceedAction: "hide",
@@ -376,6 +377,14 @@
           <span class="yt-tt-switch-track"><span class="yt-tt-switch-knob"></span></span>
         </span>
       </label>
+
+      <label class="yt-tt-setting-row">
+        <span>Disable video previews on hover</span>
+        <span class="yt-tt-switch">
+          <input id="yt-tt-disable-hover-previews" type="checkbox" />
+          <span class="yt-tt-switch-track"><span class="yt-tt-switch-knob"></span></span>
+        </span>
+      </label>
     </div>
   `;
     const logoImg = pop.querySelector(".yt-tt-pop-logo");
@@ -461,6 +470,9 @@
       const exceed = pop.querySelector("#yt-tt-exceed-action")?.value === "dim" ? "dim" : "hide";
       const hideNav = Boolean(pop.querySelector("#yt-tt-hide-nav")?.checked);
       const showDur = Boolean(pop.querySelector("#yt-tt-show-durations")?.checked);
+      const disableHoverPreviews = Boolean(
+        pop.querySelector("#yt-tt-disable-hover-previews")?.checked
+      );
       const next = await webext.runtime.sendMessage({
         type: "UPDATE_POLICY",
         patch: {
@@ -468,7 +480,8 @@
           shortsLockCutoffMinutes: cutoff,
           exceedAction: exceed,
           hideShortsNavButton: hideNav,
-          showShortDurationBadges: showDur
+          showShortDurationBadges: showDur,
+          disableHoverPreviews
         }
       });
       onStateChange(next);
@@ -478,6 +491,7 @@
     pop.querySelector("#yt-tt-exceed-action")?.addEventListener("change", syncPolicy);
     pop.querySelector("#yt-tt-hide-nav")?.addEventListener("change", syncPolicy);
     pop.querySelector("#yt-tt-show-durations")?.addEventListener("change", syncPolicy);
+    pop.querySelector("#yt-tt-disable-hover-previews")?.addEventListener("change", syncPolicy);
     return pop;
   }
   function syncTopbarControl(state, onStateChange, onWake) {
@@ -610,12 +624,14 @@
     const exceedSelect = pop.querySelector("#yt-tt-exceed-action");
     const hideNav = pop.querySelector("#yt-tt-hide-nav");
     const showDur = pop.querySelector("#yt-tt-show-durations");
+    const disableHoverPreviews = pop.querySelector("#yt-tt-disable-hover-previews");
     if (disableShorts) disableShorts.checked = state.policy.shortsMode === "redirectToWatch";
     if (cutoffRow) cutoffRow.classList.toggle("yt-tt-hidden", state.policy.shortsMode === "redirectToWatch");
     if (cutoffSelect) cutoffSelect.value = String(state.policy.shortsLockCutoffMinutes);
     if (exceedSelect) exceedSelect.value = state.policy.exceedAction;
     if (hideNav) hideNav.checked = state.policy.hideShortsNavButton;
     if (showDur) showDur.checked = state.policy.showShortDurationBadges;
+    if (disableHoverPreviews) disableHoverPreviews.checked = state.policy.disableHoverPreviews;
   }
   function tickTopbarUI(state) {
     updateTopbarBadge(state);
@@ -1617,6 +1633,7 @@
     showModal("last_expired_notice", "Your last break ended", summary, actions);
   }
   function runFullSweep() {
+    syncHoverPreviewPolicy();
     const snapshot = getCurrentSnapshot();
     if (expiredScreenRendered && snapshot.status !== "expired") {
       window.location.reload();
@@ -1700,6 +1717,34 @@
     updateFinishLineBanner(snapshot, visibleSidebarCount);
     nudgeInfiniteScrollIfSparse(visibleRegularCount);
   }
+  function syncHoverPreviewPolicy() {
+    const enabled = window.location.hostname === "www.youtube.com" && persistedState.policy.disableHoverPreviews;
+    if (enabled) {
+      document.documentElement.setAttribute("data-timetube-disable-hover-previews", "true");
+      document.querySelectorAll(
+        "#video-preview video, ytd-thumbnail:hover ytd-moving-thumbnail-renderer video, ytd-thumbnail:hover ytd-video-preview video"
+      ).forEach((video) => {
+        if (!video.paused) video.pause();
+      });
+    } else {
+      document.documentElement.removeAttribute("data-timetube-disable-hover-previews");
+    }
+  }
+  function attachHoverPreviewPlaybackGuard() {
+    document.addEventListener(
+      "play",
+      (event) => {
+        if (window.location.hostname !== "www.youtube.com" || !persistedState.policy.disableHoverPreviews) {
+          return;
+        }
+        const target = event.target;
+        if (target instanceof HTMLVideoElement && target.closest("#video-preview, ytd-moving-thumbnail-renderer, ytd-video-preview")) {
+          target.pause();
+        }
+      },
+      true
+    );
+  }
   function attachShortClickInterceptor() {
     document.addEventListener(
       "click",
@@ -1738,6 +1783,7 @@
     attachModalInputBlocker();
     attachShortClickInterceptor();
     attachDocumentMediaListeners();
+    attachHoverPreviewPlaybackGuard();
     runFullSweep();
     const maybeRedirectShortImmediately = () => {
       if (snoozedUntilReloadOrPopup || expiredScreenRendered || !isShortsPage()) return;

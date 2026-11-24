@@ -65,6 +65,7 @@ var DEFAULT_POLICY = {
   shortsLockCutoffMinutes: 5,
   hideShortsNavButton: true,
   showShortDurationBadges: true,
+  disableHoverPreviews: false,
   livestreams: "hide",
   unknownDuration: "hide",
   exceedAction: "hide",

@@ -1218,6 +1218,7 @@ function maybeShowLastExpiredNotice(): void {
 }
 
 function runFullSweep(): void {
+  syncHoverPreviewPolicy();
   const snapshot = getCurrentSnapshot();
 
   if (expiredScreenRendered && snapshot.status !== 'expired') {
@@ -1322,6 +1323,47 @@ function runFullSweep(): void {
   nudgeInfiniteScrollIfSparse(visibleRegularCount);
 }
 
+function syncHoverPreviewPolicy(): void {
+  const enabled =
+    window.location.hostname === 'www.youtube.com' && persistedState.policy.disableHoverPreviews;
+
+  if (enabled) {
+    document.documentElement.setAttribute('data-timetube-disable-hover-previews', 'true');
+    document
+      .querySelectorAll<HTMLVideoElement>(
+        '#video-preview video, ytd-thumbnail:hover ytd-moving-thumbnail-renderer video, ytd-thumbnail:hover ytd-video-preview video',
+      )
+      .forEach((video) => {
+        if (!video.paused) video.pause();
+      });
+  } else {
+    document.documentElement.removeAttribute('data-timetube-disable-hover-previews');
+  }
+}
+
+function attachHoverPreviewPlaybackGuard(): void {
+  document.addEventListener(
+    'play',
+    (event) => {
+      if (
+        window.location.hostname !== 'www.youtube.com' ||
+        !persistedState.policy.disableHoverPreviews
+      ) {
+        return;
+      }
+
+      const target = event.target;
+      if (
+        target instanceof HTMLVideoElement &&
+        target.closest('#video-preview, ytd-moving-thumbnail-renderer, ytd-video-preview')
+      ) {
+        target.pause();
+      }
+    },
+    true,
+  );
+}
+
 function attachShortClickInterceptor(): void {
   document.addEventListener(
     'click',
@@ -1367,6 +1409,7 @@ async function mountYouTubeFilterHost(): Promise<void> {
   attachModalInputBlocker();
   attachShortClickInterceptor();
   attachDocumentMediaListeners();
+  attachHoverPreviewPlaybackGuard();
   runFullSweep();
 
   const maybeRedirectShortImmediately = () => {

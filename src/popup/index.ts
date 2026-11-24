@@ -26,6 +26,7 @@ const cutoffRow = document.getElementById('cutoff-row') as HTMLElement;
 const exceedActionSelect = document.getElementById('exceed-action') as HTMLSelectElement;
 const hideShortsNavCheckbox = document.getElementById('hide-shorts-nav') as HTMLInputElement;
 const showShortDurationsCheckbox = document.getElementById('show-short-durations') as HTMLInputElement;
+const disableHoverPreviewsCheckbox = document.getElementById('disable-hover-previews') as HTMLInputElement;
 
 function formatMs(ms: number): string {
   const totalSec = Math.max(0, Math.ceil(ms / 1000));
@@ -93,6 +94,7 @@ function renderState(state: PersistedSessionState): void {
   exceedActionSelect.value = state.policy.exceedAction;
   hideShortsNavCheckbox.checked = state.policy.hideShortsNavButton;
   showShortDurationsCheckbox.checked = state.policy.showShortDurationBadges;
+  disableHoverPreviewsCheckbox.checked = state.policy.disableHoverPreviews;
 }
 
 async function syncPolicy(): Promise<void> {
@@ -104,6 +106,7 @@ async function syncPolicy(): Promise<void> {
       exceedAction: exceedActionSelect.value === 'dim' ? 'dim' : 'hide',
       hideShortsNavButton: hideShortsNavCheckbox.checked,
       showShortDurationBadges: showShortDurationsCheckbox.checked,
+      disableHoverPreviews: disableHoverPreviewsCheckbox.checked,
     },
   });
 }
@@ -171,6 +174,7 @@ async function initPopup(): Promise<void> {
   exceedActionSelect.addEventListener('change', syncPolicy);
   hideShortsNavCheckbox.addEventListener('change', syncPolicy);
   showShortDurationsCheckbox.addEventListener('change', syncPolicy);
+  disableHoverPreviewsCheckbox.addEventListener('change', syncPolicy);
 
   window.setInterval(() => {
     if (currentState) renderState(currentState);

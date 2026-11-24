@@ -33,6 +33,7 @@ export interface FilterPolicy {
   shortsLockCutoffMinutes: 5 | 10;
   hideShortsNavButton: boolean;
   showShortDurationBadges: boolean;
+  disableHoverPreviews: boolean;
   livestreams: 'hide' | 'allow';
   unknownDuration: 'hide' | 'allow';
   exceedAction: 'hide' | 'dim';
@@ -104,6 +105,7 @@ export const DEFAULT_POLICY: FilterPolicy = {
   shortsLockCutoffMinutes: 5,
   hideShortsNavButton: true,
   showShortDurationBadges: true,
+  disableHoverPreviews: false,
   livestreams: 'hide',
   unknownDuration: 'hide',
   exceedAction: 'hide',

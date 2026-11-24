@@ -71,6 +71,16 @@ html:not([dark]) {
   display: none !important;
 }
 
+/* Hide YouTube's shared desktop thumbnail-preview layer when the user opts out. */
+html[data-timetube-disable-hover-previews="true"] #video-preview {
+  display: none !important;
+}
+
+html[data-timetube-disable-hover-previews="true"] ytd-thumbnail:hover ytd-moving-thumbnail-renderer,
+html[data-timetube-disable-hover-previews="true"] ytd-thumbnail:hover ytd-video-preview {
+  display: none !important;
+}
+
 /* Lock page scrolling while a TimeTube prompt is active */
 .yt-timefit-modal-open,
 .yt-timefit-modal-open body {
