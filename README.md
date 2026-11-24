@@ -9,7 +9,7 @@
 [![Cross-Browser](https://img.shields.io/badge/Browser-Chrome%20%7C%20Firefox%20%7C%20Edge%20%7C%20Brave-orange.svg)]()
 [![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6.svg)](https://www.typescriptlang.org/)
 [![Tests](https://img.shields.io/badge/Tests-Passing%20(12%2F12)-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/Version-v1.3.0-purple.svg)]()
+[![Version](https://img.shields.io/badge/Version-v1.3.1-purple.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > **Never lose track of time on YouTube again.**
@@ -455,7 +455,7 @@ Before filing a bug report:
 
 When completing the [Bug Report form](https://github.com/17Arigato-jwd/TimeTube/issues/new?template=bug_report.yml), provide:
 - **Installation Source**: Firefox Add-ons (AMO), Chrome Web Store, Edge Add-ons, Opera Addons, unpacked source, or downloaded release ZIP.
-- **TimeTube & Browser Versions**: Extension version (`v1.3.0` or commit) and browser exact version (e.g., Chrome 131.0, Firefox 133.0).
+- **TimeTube & Browser Versions**: Extension version (`v1.3.1` or commit) and browser exact version (e.g., Chrome 131.0, Firefox 133.0).
 - **Operating System**: OS name and version (Windows 11, macOS Sequoia, Ubuntu 24.04, Android 15).
 - **Affected Feature & YouTube Page**: Select the functional component (Topbar Menu, Recommendation Pruning, Budget Modes, Overrun Guard, Shorts Guardrails, Silent Autoplay, Clean Takeover, Popup) and page location (Watch, Home, Search, Shorts, Mobile, or Global).
 - **Active Timer State**: Countdown, Clock End Time ("Until HH:MM"), Max Duration Cap, Paused, or Clean Takeover.

@@ -27,43 +27,44 @@
       </div>
     </section>
 
-    <section class="tt-section">
-      <div class="tt-tabs" role="tablist">
-        <button type="button" class="tt-tab active" data-mode="countdown">Timer</button>
-        <button type="button" class="tt-tab" data-mode="until">End time</button>
-        <button type="button" class="tt-tab" data-mode="maxLength">Max length</button>
-      </div>
-
-      <div id="panel-countdown" class="tt-mode-panel">
-        <div class="tt-chips">
-          <button type="button" class="tt-chip" data-mins="15">15 min</button>
-          <button type="button" class="tt-chip active" data-mins="25">25 min</button>
-          <button type="button" class="tt-chip" data-mins="45">45 min</button>
+    <div id="session-setup" class="hidden">
+      <section class="tt-section">
+        <div class="tt-tabs" role="tablist">
+          <button type="button" class="tt-tab active" data-mode="countdown">Timer</button>
+          <button type="button" class="tt-tab" data-mode="until">End time</button>
+          <button type="button" class="tt-tab" data-mode="maxLength">Max length</button>
         </div>
-        <label class="tt-field-row">
-          <span>Custom minutes</span>
-          <input id="countdown-mins" type="number" min="1" max="360" value="25" class="tt-input" />
-        </label>
-      </div>
 
-      <div id="panel-until" class="tt-mode-panel hidden">
-        <label class="tt-field-row">
-          <span>Stop watching at</span>
-          <input id="until-time" type="time" value="17:00" class="tt-input" />
-        </label>
-      </div>
+        <div id="panel-countdown" class="tt-mode-panel">
+          <div class="tt-chips">
+            <button type="button" class="tt-chip" data-mins="15">15 min</button>
+            <button type="button" class="tt-chip active" data-mins="25">25 min</button>
+            <button type="button" class="tt-chip" data-mins="45">45 min</button>
+          </div>
+          <label class="tt-field-row">
+            <span>Custom minutes</span>
+            <input id="countdown-mins" type="number" min="1" max="360" value="25" class="tt-input" />
+          </label>
+        </div>
 
-      <div id="panel-maxLength" class="tt-mode-panel hidden">
-        <label class="tt-field-row">
-          <span>Max video length (min)</span>
-          <input id="max-length-mins" type="number" min="1" max="240" value="15" class="tt-input" />
-        </label>
-      </div>
+        <div id="panel-until" class="tt-mode-panel hidden">
+          <label class="tt-field-row">
+            <span>Stop watching at</span>
+            <input id="until-time" type="time" value="17:00" class="tt-input" />
+          </label>
+        </div>
 
-      <button id="start-btn" type="button" class="tt-pill-btn tt-pill-primary tt-full">Start session</button>
-    </section>
+        <div id="panel-maxLength" class="tt-mode-panel hidden">
+          <label class="tt-field-row">
+            <span>Max video length (min)</span>
+            <input id="max-length-mins" type="number" min="1" max="240" value="15" class="tt-input" />
+          </label>
+        </div>
 
-    <div class="tt-divider" role="separator"></div>
+        <button id="start-btn" type="button" class="tt-pill-btn tt-pill-primary tt-full">Start session</button>
+      </section>
+      <div class="tt-divider" role="separator"></div>
+    </div>
 
     <section class="tt-section tt-settings">
       <h2 class="tt-section-label">Playback &amp; Shorts</h2>
