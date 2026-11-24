@@ -31,6 +31,7 @@ Originally developed as **TimeFit**, **TimeTube** has evolved into a complete, i
   - [6. Silent Autoplay Verification](#6-silent-autoplay-verification)
   - [7. Clean Takeover and Lifecycle Auto-Reset](#7-clean-takeover-and-lifecycle-auto-reset)
 - [Installation Guide](#installation-guide)
+  - [Official Web Stores](#official-web-stores)
   - [Step 1: Download or Clone the Repository](#step-1-download-or-clone-the-repository)
   - [Step 2: Load the Extension into Your Browser](#step-2-load-the-extension-into-your-browser)
     - [Google Chrome and Chromium](#google-chrome-and-chromium)
@@ -98,7 +99,22 @@ Originally developed as **TimeFit**, **TimeTube** has evolved into a complete, i
 
 ## Installation Guide
 
-You can install TimeTube in any Chromium-based or Gecko-based modern browser in just a couple of minutes.
+TimeTube runs on any Chromium-based or Gecko-based modern browser.
+
+### Official Web Stores
+
+TimeTube is distributed through official browser extension stores as well as manual unpacked loading from source. Store availability and review statuses are tracked below:
+
+| Browser Store | Supported Browsers | Status | Download Link |
+| :--- | :--- | :--- | :--- |
+| Firefox Add-ons (AMO) | Firefox Desktop & Android | Pending Review | Direct link available upon approval |
+| Opera Addons | Opera & Opera GX | Pending Review | Direct link available upon approval |
+| Chrome Web Store | Chrome, Brave, Edge, Vivaldi | Planned | Direct link coming soon |
+| Microsoft Edge Add-ons | Microsoft Edge | Planned | Direct link coming soon |
+
+While store submissions are being finalized, or to run the latest development build from source, follow the unpacked installation instructions below.
+
+---
 
 ### Step 1: Download or Clone the Repository
 

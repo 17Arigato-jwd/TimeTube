@@ -1,0 +1,66 @@
+name: Feature Request
+description: Suggest a new capability, UI improvement, or timer mode
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping shape TimeTube! Please describe how your idea benefits user productivity and digital wellbeing.
+
+  - type: dropdown
+    id: feature-area
+    attributes:
+      label: Target Component or Feature Area
+      description: Which part of TimeTube would this feature improve?
+      options:
+        - In-page YouTube Topbar Menu & Timer Pill
+        - Video Recommendation Filtering (Watch sidebar / Home / Search)
+        - Shorts Controls & Guardrails
+        - Overrun Guard & Playback Speed Scaling
+        - Session Budget Modes (Countdown / Until Time / Duration Cap)
+        - Takeover Screen & Lifecycle Management
+        - Extension Toolbar Popup & Settings
+        - Cross-browser Support
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Use Case
+      description: Is your feature related to a specific limitation, friction, or pain point?
+      placeholder: "e.g., As someone using YouTube for tutorials during work breaks, I want..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution & User Experience
+      description: Describe how you envision the feature working and looking in the YouTube UI.
+      placeholder: "Add a button or setting that..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Have you tried other workarounds, extensions, or scripts for this?
+      placeholder: "e.g., Currently I have to manually..."
+    validations:
+      required: false
+
+  - type: dropdown
+    id: pr-willingness
+    attributes:
+      label: Contribution Willingness
+      description: Would you be willing to implement this feature and submit a Pull Request?
+      options:
+        - "Yes, I would like to build this and open a PR"
+        - "Maybe, with some guidance or mentorship"
+        - "No, I am only proposing the feature"
+    validations:
+      required: true

@@ -1,0 +1,195 @@
+name: Bug Report
+description: Report a broken feature, visual glitch, or incorrect video filtering
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue! Please provide the details below so we can reproduce and fix the bug quickly.
+
+  - type: dropdown
+    id: install-source
+    attributes:
+      label: Installation Source
+      description: Where did you install or load TimeTube from?
+      options:
+        - Firefox Add-ons Store (AMO)
+        - Opera Addons Store
+        - Chrome Web Store
+        - Microsoft Edge Add-ons
+        - Loaded unpacked from source / GitHub
+        - Downloaded release ZIP
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: extension-version
+    attributes:
+      label: TimeTube Version
+      description: Specify your TimeTube version (e.g., v1.3.0). Check this on your browser's extension management page.
+      placeholder: "e.g., v1.3.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      description: Which browser are you using?
+      options:
+        - Google Chrome
+        - Mozilla Firefox (Desktop)
+        - Mozilla Firefox (Android)
+        - Opera
+        - Opera GX
+        - Brave Browser
+        - Microsoft Edge
+        - Vivaldi
+        - Arc
+        - Other (specify in version field)
+    validations:
+      required: true
+
+  - type: input
+    id: browser-version
+    attributes:
+      label: Browser Exact Version
+      description: Find this in your browser's Help > About menu.
+      placeholder: "e.g., Chrome 131.0.6778.86, Firefox 133.0"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      description: Operating system and version.
+      placeholder: "e.g., Windows 11 24H2, macOS Sequoia 15.1, Ubuntu 24.04, Android 15"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected-feature
+    attributes:
+      label: Affected Component or Feature
+      description: Which part of TimeTube is experiencing the problem?
+      options:
+        - In-page Topbar Menu & Remaining Time Badge
+        - Watch Sidebar Video Pruning
+        - Home Feed / Search Feed Video Pruning
+        - Shorts Duration Pill / Escalation / Redirect
+        - Overrun Guard / Dynamic Playback Speed
+        - Takeover Screen (Time's Up) / Tab Lifecycle Auto-Reset
+        - Extension Toolbar Popup & Settings
+        - Other / Unsure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: page-type
+    attributes:
+      label: YouTube Page Type
+      description: Where on YouTube does this bug occur?
+      options:
+        - Watch page (video player & sidebar recommendations)
+        - Home feed recommendations
+        - Search results page
+        - Shorts (/shorts/)
+        - Top navigation bar (in-page badge / popover)
+        - Extension toolbar popup
+        - Takeover screen (Time's up)
+        - Global / across all pages
+    validations:
+      required: true
+
+  - type: dropdown
+    id: timer-state
+    attributes:
+      label: Active Timer State
+      description: What was TimeTube's timer state when the bug occurred?
+      options:
+        - Active Countdown (e.g., 15m / 25m / 45m preset or custom)
+        - Clock End Time (Until HH:MM)
+        - Paused Countdown
+        - Expired / Takeover active
+        - Idle / No timer active
+        - Not sure / Other
+    validations:
+      required: false
+
+  - type: input
+    id: video-url
+    attributes:
+      label: Affected YouTube URL (Optional)
+      description: If this issue happened on a specific video, Short, or search query, paste the link here.
+      placeholder: "https://www.youtube.com/watch?v=..."
+    validations:
+      required: false
+
+  - type: input
+    id: other-extensions
+    attributes:
+      label: Other Active YouTube Extensions
+      description: List any other extensions that modify YouTube (e.g., uBlock Origin, SponsorBlock, Return YouTube Dislike). Type "None" if none are installed.
+      placeholder: "e.g., uBlock Origin, SponsorBlock (or 'None')"
+    validations:
+      required: false
+
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: Bug Description & Expected vs. Actual Behavior
+      description: A clear and concise description of the bug. What actually happened, and what did you expect to happen instead?
+      placeholder: "When opening a Watch page with 10 minutes left on the timer, the sidebar..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro-steps
+    attributes:
+      label: Steps to Reproduce
+      description: Provide clear, numbered steps to reproduce the issue.
+      placeholder: |
+        1. Set timer to 25m in the topbar popover
+        2. Navigate to https://www.youtube.com/watch?v=...
+        3. Observe the sidebar video recommendations
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or Screen Recordings (Required for UI/Visual Issues)
+      description: |
+        If the bug involves visual glitches, misaligned elements, overlapping badges, missing topbar icons, or incorrect modal popovers, **drag and drop a screenshot or screen recording directly into this box**. If this is a purely non-visual logic error, type "N/A - Non-visual issue".
+      placeholder: "Drag and drop your screenshot/video here (or type 'N/A')..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: console-logs
+    attributes:
+      label: Browser Console Errors
+      description: |
+        Open browser Developer Tools (**F12** or **Ctrl+Shift+I** / **Cmd+Option+I** -> **Console** tab), reproduce the bug, and paste any red error messages below.
+      render: shell
+      placeholder: "Paste red console error messages here (or type 'None')..."
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please verify these items before submitting.
+      options:
+        - label: I have confirmed that this bug occurs with TimeTube enabled and is caused by TimeTube.
+          required: true
+        - label: I searched open and closed issues and confirmed this is not a duplicate.
+          required: true
+        - label: I am using the latest release or main branch of TimeTube.
+          required: true
+        - label: I tested after refreshing the page or reloading the extension.
+          required: true
