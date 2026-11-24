@@ -1,8 +1,8 @@
-name: Auto Label Issue
+name: Auto Label Issues
 
 on:
   issues:
-    types: [opened]
+    types: [opened, edited]
 
 permissions:
   issues: write
@@ -17,46 +17,128 @@ jobs:
         with:
           script: |
             const body = context.payload.issue.body || '';
-            const labels = new Set();
+            const issueNumber = context.issue.number;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
 
-            // 1. YouTube Page Type
-            if (body.includes('Watch page (video player & sidebar recommendations)')) labels.add('page: watch');
-            if (body.includes('Home feed recommendations')) labels.add('page: home');
-            if (body.includes('Search results page')) labels.add('page: search');
-            if (body.includes('Shorts (/shorts/)') || body.includes('Shorts Controls & Guardrails')) labels.add('page: shorts');
-            if (body.includes('Top navigation bar (in-page badge / popover)') || body.includes('In-page YouTube Topbar Menu & Timer Pill')) labels.add('component: topbar');
-            if (body.includes('Extension toolbar popup') || body.includes('Extension Toolbar Popup & Settings')) labels.add('component: popup');
-            if (body.includes('Takeover screen (Time\'s up)') || body.includes('Takeover Screen & Lifecycle Management')) labels.add('component: takeover');
-            if (body.includes('Global / across all pages')) labels.add('page: global');
-
-            // 2. Installation Source
-            if (body.includes('Firefox Add-ons Store (AMO)')) labels.add('store: firefox');
-            if (body.includes('Opera Addons Store')) labels.add('store: opera');
-            if (body.includes('Chrome Web Store')) labels.add('store: chrome');
-            if (body.includes('Microsoft Edge Add-ons')) labels.add('store: edge');
-
-            // 3. Browser Family
-            if (body.includes('Mozilla Firefox (Desktop)') || body.includes('Mozilla Firefox (Android)')) labels.add('browser: firefox');
-            if (body.includes('Opera GX') || body.includes('Opera')) labels.add('browser: opera');
-            if (body.includes('Google Chrome')) labels.add('browser: chrome');
-            if (body.includes('Brave Browser')) labels.add('browser: brave');
-            if (body.includes('Microsoft Edge')) labels.add('browser: edge');
-
-            // 4. Honeypot / trap checklist verification (case-insensitive [x] or [X])
-            const honeypotRegex = /- \[[xX]\] I've ticked the checkboxes without reading their contents\./;
-            if (honeypotRegex.test(body)) {
-              labels.add('invalid / unread-checklist');
+            // Helper: Extract content under a specific markdown heading (### <header>)
+            function getSection(text, header) {
+              const escaped = header.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const regex = new RegExp(`(?:^|\\r?\\n)###\\s+${escaped}\\s*\\r?\\n([\\s\\S]*?)(?=(?:\\r?\\n###\\s+)|$)`, 'i');
+              const match = text.match(regex);
+              return match ? match[1].trim() : '';
             }
 
-            const labelsToAdd = Array.from(labels);
+            const labels = new Set();
+
+            // 1. Installation Source (Bug Report)
+            const installSource = getSection(body, 'Installation Source');
+            if (installSource.includes('Firefox Add-ons Store')) labels.add('store: firefox');
+            else if (installSource.includes('Opera Addons Store')) labels.add('store: opera');
+            else if (installSource.includes('Chrome Web Store')) labels.add('store: chrome');
+            else if (installSource.includes('Microsoft Edge Add-ons')) labels.add('store: edge');
+            else if (installSource.includes('Loaded unpacked from source')) labels.add('install: unpacked');
+            else if (installSource.includes('Downloaded CI / Release ZIP') || installSource.includes('Downloaded release ZIP')) labels.add('install: release-zip');
+
+            // 2. Browser Family (Bug Report)
+            const browser = getSection(body, 'Browser');
+            if (browser.includes('Google Chrome')) labels.add('browser: chrome');
+            else if (browser.includes('Mozilla Firefox')) labels.add('browser: firefox');
+            else if (browser.includes('Brave Browser')) labels.add('browser: brave');
+            else if (browser.includes('Microsoft Edge')) labels.add('browser: edge');
+            else if (browser.includes('Opera GX')) labels.add('browser: opera-gx');
+            else if (browser.includes('Opera')) labels.add('browser: opera');
+            else if (browser.includes('Vivaldi')) labels.add('browser: vivaldi');
+            else if (browser.includes('Arc')) labels.add('browser: arc');
+
+            // 3. Affected TimeTube Feature (Bug Report)
+            const affectedFeature = getSection(body, 'Affected TimeTube Feature') || getSection(body, 'Affected Component or Feature');
+            if (affectedFeature.includes('Topbar Menu')) labels.add('component: topbar');
+            else if (affectedFeature.includes('Sidebar Video Pruning')) labels.add('component: recommendation-pruning');
+            else if (affectedFeature.includes('Home / Search Feed Pruning') || affectedFeature.includes('Home Feed / Search Feed')) labels.add('component: recommendation-pruning');
+            else if (affectedFeature.includes('Budget Modes')) labels.add('component: budget-modes');
+            else if (affectedFeature.includes('Overrun Guard')) labels.add('component: overrun-guard');
+            else if (affectedFeature.includes('Smart Shorts Guardrails') || affectedFeature.includes('Shorts Duration Pill')) labels.add('component: shorts');
+            else if (affectedFeature.includes('Silent Autoplay Verification')) labels.add('component: autoplay');
+            else if (affectedFeature.includes('Clean Takeover') || affectedFeature.includes('Takeover Screen')) labels.add('component: takeover');
+            else if (affectedFeature.includes('Extension Toolbar Popup')) labels.add('component: popup');
+
+            // 4. Target Component or Feature Area (Feature Request)
+            const featureArea = getSection(body, 'Target Component or Feature Area');
+            if (featureArea.includes('Topbar Menu')) labels.add('component: topbar');
+            else if (featureArea.includes('Recommendation Pruning') || featureArea.includes('Recommendation Filtering')) labels.add('component: recommendation-pruning');
+            else if (featureArea.includes('Budget Modes') || featureArea.includes('Session Budget Modes')) labels.add('component: budget-modes');
+            else if (featureArea.includes('Overrun Guard')) labels.add('component: overrun-guard');
+            else if (featureArea.includes('Shorts Guardrails') || featureArea.includes('Shorts Controls')) labels.add('component: shorts');
+            else if (featureArea.includes('Silent Autoplay Verification')) labels.add('component: autoplay');
+            else if (featureArea.includes('Clean Takeover') || featureArea.includes('Takeover')) labels.add('component: takeover');
+            else if (featureArea.includes('Extension Toolbar Popup')) labels.add('component: popup');
+            else if (featureArea.includes('Localization / Duration Parser')) labels.add('area: localization');
+            else if (featureArea.includes('Cross-browser')) labels.add('area: cross-browser');
+
+            // 5. YouTube Page Type (Bug Report)
+            const pageType = getSection(body, 'YouTube Page Type');
+            if (pageType.includes('Watch page')) labels.add('page: watch');
+            else if (pageType.includes('Home feed')) labels.add('page: home');
+            else if (pageType.includes('Search results')) labels.add('page: search');
+            else if (pageType.includes('Shorts player') || pageType.includes('Shorts (/shorts/)')) labels.add('page: shorts');
+            else if (pageType.includes('Channel / Subscriptions')) labels.add('page: channel');
+            else if (pageType.includes('Mobile YouTube')) labels.add('page: mobile');
+            else if (pageType.includes('Global')) labels.add('page: global');
+            else if (pageType.includes('Toolbar Popup')) labels.add('component: popup');
+
+            // 6. Active Budget / Timer State (Bug Report)
+            const timerState = getSection(body, 'Active Budget / Timer State');
+            if (timerState.includes('Countdown Timer')) labels.add('mode: countdown');
+            else if (timerState.includes('Clock End Time')) labels.add('mode: until-time');
+            else if (timerState.includes('Max Video Duration Cap')) labels.add('mode: duration-cap');
+            else if (timerState.includes('Paused Countdown')) labels.add('mode: paused');
+            else if (timerState.includes('Clean Takeover')) labels.add('component: takeover');
+
+            // 7. Contribution Willingness (Feature Request)
+            const prWillingness = getSection(body, 'Contribution Willingness');
+            if (prWillingness.includes('Yes, I would like to build this')) {
+              labels.add('pr-welcome');
+            } else if (prWillingness.includes('Maybe, with some guidance')) {
+              labels.add('pr-welcome');
+              labels.add('good first issue');
+            }
+
+            // 8. Honeypot Checklist Verification & Stale Label Removal
+            const checklist = getSection(body, 'Pre-submission Checklist') || body;
+            const honeypotChecked = /- \[[xX]\] I've ticked the checkboxes without reading their contents\./.test(checklist);
+
+            const existingLabels = (context.payload.issue.labels || []).map(l => (typeof l === 'string' ? l : l.name));
+            const hasInvalidLabel = existingLabels.includes('invalid / unread-checklist');
+
+            if (honeypotChecked) {
+              labels.add('invalid / unread-checklist');
+            } else if (hasInvalidLabel) {
+              console.log(`Honeypot unchecked on issue #${issueNumber}; removing 'invalid / unread-checklist' label.`);
+              try {
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  name: 'invalid / unread-checklist'
+                });
+              } catch (err) {
+                if (err.status !== 404) {
+                  console.error('Error removing invalid label:', err);
+                }
+              }
+            }
+
+            // Add new labels that do not already exist on the issue
+            const labelsToAdd = Array.from(labels).filter(l => !existingLabels.includes(l));
             if (labelsToAdd.length > 0) {
-              console.log(`Adding labels to issue #${context.issue.number}:`, labelsToAdd);
+              console.log(`Adding labels to issue #${issueNumber}:`, labelsToAdd);
               await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
+                owner,
+                repo,
+                issue_number: issueNumber,
                 labels: labelsToAdd
               });
             } else {
-              console.log(`No matching labels found for issue #${context.issue.number}.`);
+              console.log(`No new labels to add for issue #${issueNumber}.`);
             }

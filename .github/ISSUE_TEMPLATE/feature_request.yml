@@ -6,7 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping shape TimeTube! Please describe how your idea benefits user productivity and digital wellbeing.
+        Thanks for helping shape **TimeTube**! Please explain how your idea improves intentional YouTube usage, session productivity, and digital wellbeing.
+        > Note: Features that encourage endless scrolling, engagement traps, or dark patterns are strictly out of scope.
 
   - type: dropdown
     id: feature-area
@@ -14,14 +15,16 @@ body:
       label: Target Component or Feature Area
       description: Which part of TimeTube would this feature improve?
       options:
-        - In-page YouTube Topbar Menu & Timer Pill
-        - Video Recommendation Filtering (Watch sidebar / Home / Search)
-        - Shorts Controls & Guardrails
-        - Overrun Guard & Playback Speed Scaling
-        - Session Budget Modes (Countdown / Until Time / Duration Cap)
-        - Takeover Screen & Lifecycle Management
+        - In-page Topbar Menu & Remaining Time Badge
+        - Video Recommendation Pruning (Watch Sidebar / Home / Search)
+        - Budget Modes (Countdown / Until HH:MM / Max Duration Cap)
+        - Overrun Guard & Dynamic Playback Speed
+        - Smart Shorts Guardrails
+        - Silent Autoplay Verification
+        - Clean Takeover & Lifecycle Auto-Reset
         - Extension Toolbar Popup & Settings
-        - Cross-browser Support
+        - Localization / Duration Parser (ARIA / Languages)
+        - Cross-browser / Mobile Support
         - Other / Multiple Areas
     validations:
       required: true
@@ -30,8 +33,8 @@ body:
     id: problem
     attributes:
       label: Problem or Use Case
-      description: Is your feature related to a specific limitation, friction, or pain point?
-      placeholder: "e.g., As someone using YouTube for tutorials during work breaks, I want..."
+      description: What friction or limitation are you running into during a YouTube session?
+      placeholder: "e.g., When using YouTube for study tutorials with a 30m timer, I want..."
     validations:
       required: true
 
@@ -39,17 +42,17 @@ body:
     id: proposed-solution
     attributes:
       label: Proposed Solution & User Experience
-      description: Describe how you envision the feature working and looking in the YouTube UI.
-      placeholder: "Add a button or setting that..."
+      description: How should this look and behave inside YouTube or the TimeTube popover?
+      placeholder: "Add an option in the topbar popover that..."
     validations:
       required: true
 
   - type: textarea
-    id: alternatives
+    id: implementation-notes
     attributes:
-      label: Alternatives Considered
-      description: Have you tried other workarounds, extensions, or scripts for this?
-      placeholder: "e.g., Currently I have to manually..."
+      label: Suggested Implementation / Architectural Notes (Optional)
+      description: If you're familiar with TimeTube's codebase (`src/core/` vs. `src/content/`), share any technical ideas or edge cases.
+      placeholder: "e.g., Extend `resolveBudget` in `src/core/policy.ts` and add unit tests in `tests/policy.test.ts`..."
     validations:
       required: false
 
@@ -57,11 +60,11 @@ body:
     id: pr-willingness
     attributes:
       label: Contribution Willingness
-      description: Would you be willing to implement this feature and submit a Pull Request?
+      description: Would you like to implement this and open a Pull Request (including unit tests in `tests/policy.test.ts`)?
       options:
         - "Yes, I would like to build this and open a PR"
-        - "Maybe, with some guidance or mentorship"
-        - "No, I am only proposing the feature"
+        - "Maybe, with some guidance from maintainers"
+        - "No, I am only proposing the idea"
     validations:
       required: true
 
@@ -69,13 +72,11 @@ body:
     id: checklist
     attributes:
       label: Pre-submission Checklist
-      description: Please verify these items before submitting your feature request.
+      description: Please read every line carefully before ticking.
       options:
-        - label: I searched open and closed feature requests and confirmed this is not a duplicate.
+        - label: I have read the above instructions and searched existing issues to confirm this is not a duplicate.
           required: true
-        - label: This feature aligns with TimeTube's focus on digital wellbeing and session productivity.
-          required: true
-        - label: I have provided a clear explanation of the use case and expected behavior.
+        - label: This idea supports digital wellbeing and intentional viewing (no engagement traps or endless-scroll enablers).
           required: true
         - label: I've ticked the checkboxes without reading their contents.
           required: false

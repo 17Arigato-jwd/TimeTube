@@ -43,7 +43,8 @@ jobs:
             LICENSE \
             assets/ \
             dist/ \
-            popup/
+            popup/ \
+            src/content/styles.css
 
       - name: Upload extension artifact
         uses: actions/upload-artifact@v4

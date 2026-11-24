@@ -442,20 +442,38 @@ To keep TimeTube reliable across continuous YouTube updates and different browse
 
 ### 7. Reporting Bugs and Requesting Features
 
+To ensure fast triage and high-quality investigation, blank issues are disabled. All issues are filed using structured GitHub Issue Forms:
+- **[Choose an Issue Template](https://github.com/17Arigato-jwd/TimeTube/issues/new/choose)**
+- **[Submit a Bug Report](https://github.com/17Arigato-jwd/TimeTube/issues/new?template=bug_report.yml)**
+- **[Submit a Feature Request](https://github.com/17Arigato-jwd/TimeTube/issues/new?template=feature_request.yml)**
+
 #### Bug Reports
-When filing an issue for a bug on GitHub, please include:
-- **Browser name and exact version** (e.g., Chrome 131.0, Firefox 133.0).
-- **Operating system** (e.g., Windows 11, macOS Sequoia, Ubuntu 24.04).
-- **YouTube page type** (Watch page, Home feed, Search results, Shorts).
-- **Screenshots or Screen Recordings (Required for UI/visual issues):** If the bug involves visual glitches, misaligned elements, overlapping badges, missing topbar icons, or incorrect modals, attach a screenshot or recording demonstrating the issue.
-- **Reproduction steps:** Clear step-by-step instructions and expected vs. actual behavior.
-- **Console errors:** Any red error logs from the browser DevTools Console (`F12` -> Console tab).
+Before filing a bug report:
+1. Review the [Troubleshooting and Updating](#troubleshooting-and-updating) guide to reload the extension after updates or rebuilds.
+2. Search open and closed issues to confirm it is not a duplicate.
+3. Confirm the issue persists when conflicting YouTube extensions (e.g., ad blockers or enhancers) are disabled.
+
+When completing the [Bug Report form](https://github.com/17Arigato-jwd/TimeTube/issues/new?template=bug_report.yml), provide:
+- **Installation Source**: Firefox Add-ons (AMO), Chrome Web Store, Edge Add-ons, Opera Addons, unpacked source, or downloaded release ZIP.
+- **TimeTube & Browser Versions**: Extension version (`v1.3.0` or commit) and browser exact version (e.g., Chrome 131.0, Firefox 133.0).
+- **Operating System**: OS name and version (Windows 11, macOS Sequoia, Ubuntu 24.04, Android 15).
+- **Affected Feature & YouTube Page**: Select the functional component (Topbar Menu, Recommendation Pruning, Budget Modes, Overrun Guard, Shorts Guardrails, Silent Autoplay, Clean Takeover, Popup) and page location (Watch, Home, Search, Shorts, Mobile, or Global).
+- **Active Timer State**: Countdown, Clock End Time ("Until HH:MM"), Max Duration Cap, Paused, or Clean Takeover.
+- **Reproduction Steps**: Step-by-step instructions with expected vs. actual behavior.
+- **Screenshots / Recordings**: Required for UI glitches, misalignment, or badge errors (or enter `N/A - Non-visual issue`).
+- **Console Logs**: Red error logs from DevTools Console (`F12` -> Console tab, or enter `None`).
+- **Pre-submission Checklist**: Please read every item carefully before checking.
 
 #### Feature Requests
-Open an issue detailing:
-- The proposed capability or user flow.
-- Why it benefits user productivity and digital wellbeing.
-- Suggested implementation approach (if known).
+Feature suggestions must align with TimeTube's core philosophy: promoting intentional viewing and digital wellbeing.
+> **Scope Boundary:** Features that encourage endless scrolling, engagement traps, or dark patterns are strictly out of scope.
+
+When completing the [Feature Request form](https://github.com/17Arigato-jwd/TimeTube/issues/new?template=feature_request.yml), provide:
+- **Target Component or Feature Area**: Topbar Menu, Recommendation Pruning, Budget Modes, Overrun Guard, Smart Shorts, Silent Autoplay, Clean Takeover, Popup, Localization / Duration Parser, or Cross-browser Support.
+- **Problem or Use Case**: Friction or limitation encountered during your YouTube session.
+- **Proposed Solution**: Desired behavior, visual presentation, or interaction model.
+- **Suggested Implementation / Architectural Notes (Optional)**: Codebase pointers (e.g., `src/core/` policy resolution and `tests/policy.test.ts` unit tests).
+- **Contribution Willingness**: Indicate if you want to implement it and submit a PR (auto-tagged with `pr-welcome` and `good first issue`).
 
 ---
 

@@ -6,3 +6,6 @@ contact_links:
   - name: Contributing Guidelines
     url: https://github.com/17Arigato-jwd/TimeTube#contributing-guidelines
     about: Review quality gates, test commands, and coding standards.
+  - name: Troubleshooting & Reloading Guide
+    url: https://github.com/17Arigato-jwd/TimeTube#troubleshooting-and-updating
+    about: How to reload or rebuild the extension after updating.
