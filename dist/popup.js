@@ -178,9 +178,13 @@ function migrateSchedule(state, now) {
   if (oldWindow && activeBudget && oldWindow.key !== activeBudget.key && usage[oldWindow.key]) {
     const previous = usage[oldWindow.key];
     const current = usage[activeBudget.key] ?? { usedMs: 0, recent: [] };
-    usage[activeBudget.key] = { ...current, usedMs: current.usedMs + previous.usedMs };
+    const balance = { ...current, usedMs: current.usedMs + previous.usedMs };
+    if (previous.limitOverrideMs !== void 0) {
+      balance.limitOverrideMs = Math.max(current.limitOverrideMs ?? 0, previous.limitOverrideMs);
+    }
+    usage[activeBudget.key] = balance;
   }
-  if (oldWindow && !activeBudget && usage[oldWindow.key]?.usedMs) {
+  if (oldWindow && !activeBudget) {
     migrated.legacyCarry = { key: oldWindow.key, ruleId: oldWindow.rule.id, start: now, end: oldWindow.end };
   }
   return migrated;

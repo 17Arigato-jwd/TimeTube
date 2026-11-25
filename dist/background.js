@@ -145,9 +145,13 @@ function migrateSchedule(state, now) {
   if (oldWindow && activeBudget && oldWindow.key !== activeBudget.key && usage[oldWindow.key]) {
     const previous = usage[oldWindow.key];
     const current = usage[activeBudget.key] ?? { usedMs: 0, recent: [] };
-    usage[activeBudget.key] = { ...current, usedMs: current.usedMs + previous.usedMs };
+    const balance = { ...current, usedMs: current.usedMs + previous.usedMs };
+    if (previous.limitOverrideMs !== void 0) {
+      balance.limitOverrideMs = Math.max(current.limitOverrideMs ?? 0, previous.limitOverrideMs);
+    }
+    usage[activeBudget.key] = balance;
   }
-  if (oldWindow && !activeBudget && usage[oldWindow.key]?.usedMs) {
+  if (oldWindow && !activeBudget) {
     migrated.legacyCarry = { key: oldWindow.key, ruleId: oldWindow.rule.id, start: now, end: oldWindow.end };
   }
   return migrated;
@@ -301,8 +305,9 @@ async function processMessage(message, sender, startSession2) {
   if (raw !== schedule) await webext.storage.local.set({ [SCHEDULE_KEY]: schedule });
   switch (message.type) {
     case "SAVE_SCHEDULE": {
-      validateSchedule(message.enabled, message.rules);
-      const rulesChanged = JSON.stringify(message.rules) !== JSON.stringify(schedule.rules);
+      const rules = message.rules ?? schedule.rules;
+      validateSchedule(message.enabled, rules);
+      const rulesChanged = JSON.stringify(rules) !== JSON.stringify(schedule.rules);
       const enabledChanged = message.enabled !== schedule.enabled;
       const usage = { ...schedule.usage };
       if (rulesChanged || enabledChanged) {
@@ -311,7 +316,7 @@ async function processMessage(message, sender, startSession2) {
           if (year === void 0 || month === void 0 || day === void 0) continue;
           const weekday = new Date(year, month - 1, day).getDay();
           const oldRule = schedule.rules.find((rule) => rule.days.includes(weekday));
-          const newRule = message.rules.find((rule) => rule.days.includes(weekday));
+          const newRule = rules.find((rule) => rule.days.includes(weekday));
           const retained = { ...entry, countingUntil: 0 };
           if (!oldRule || !newRule || oldRule.id !== newRule.id || oldRule.start !== newRule.start || oldRule.end !== newRule.end || oldRule.windowEnabled !== newRule.windowEnabled) {
             delete retained.closesAtOverride;
@@ -322,7 +327,7 @@ async function processMessage(message, sender, startSession2) {
           usage[key] = retained;
         }
       }
-      const next = { ...schedule, enabled: message.enabled, rules: message.rules, usage };
+      const next = { ...schedule, enabled: message.enabled, rules, usage };
       if (rulesChanged) delete next.legacyCarry;
       await webext.storage.local.set({ [SCHEDULE_KEY]: next });
       if (rulesChanged || message.enabled !== schedule.enabled) samples.clear();
@@ -333,13 +338,15 @@ async function processMessage(message, sender, startSession2) {
       if (tabId === void 0 || !schedule.enabled) return;
       const id = `${tabId}:${message.documentId}`;
       const previous = samples.get(id);
-      for (const [key, sample] of samples) {
-        if (now - sample.at > MAX_SAMPLE_GAP_MS) samples.delete(key);
+      for (const [key, sample2] of samples) {
+        if (now - sample2.at > MAX_SAMPLE_GAP_MS) samples.delete(key);
       }
-      samples.set(id, { at: now, visible: message.visible, playing: message.playing });
+      const sample = { at: now, visible: message.visible, playing: message.playing };
       const charged = previous ? recordUsage(schedule, previous.at, now, previous) : schedule;
-      const next = updateCounting(charged, now, [...samples.values()].filter((sample) => now - sample.at < 2500));
+      const activeSamples = [...samples].filter(([key, cursor]) => key !== id && now - cursor.at < 2500);
+      const next = updateCounting(charged, now, [sample, ...activeSamples.map(([, cursor]) => cursor)]);
       if (next !== schedule) await webext.storage.local.set({ [SCHEDULE_KEY]: next });
+      samples.set(id, sample);
       return;
     }
     case "START_SCHEDULED_SESSION": {

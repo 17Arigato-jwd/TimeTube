@@ -209,9 +209,13 @@
     if (oldWindow && activeBudget && oldWindow.key !== activeBudget.key && usage[oldWindow.key]) {
       const previous = usage[oldWindow.key];
       const current = usage[activeBudget.key] ?? { usedMs: 0, recent: [] };
-      usage[activeBudget.key] = { ...current, usedMs: current.usedMs + previous.usedMs };
+      const balance = { ...current, usedMs: current.usedMs + previous.usedMs };
+      if (previous.limitOverrideMs !== void 0) {
+        balance.limitOverrideMs = Math.max(current.limitOverrideMs ?? 0, previous.limitOverrideMs);
+      }
+      usage[activeBudget.key] = balance;
     }
-    if (oldWindow && !activeBudget && usage[oldWindow.key]?.usedMs) {
+    if (oldWindow && !activeBudget) {
       migrated.legacyCarry = { key: oldWindow.key, ruleId: oldWindow.rule.id, start: now, end: oldWindow.end };
     }
     return migrated;
@@ -2072,8 +2076,20 @@
     } catch {
       persistedState = { ...INITIAL_PERSISTED_STATE };
     }
+    let scheduleChanged = false;
+    let scheduleReady = false;
+    webext.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local" || !changes[SCHEDULE_KEY]) return;
+      scheduleChanged = true;
+      const wasEnabled = schedule.enabled;
+      schedule = changes[SCHEDULE_KEY].newValue ?? EMPTY_SCHEDULE;
+      if (!scheduleReady) return;
+      if (schedule.enabled && !wasEnabled) publishScheduleSample();
+      if (scheduleRestrictsAccess() !== scheduleBlocked) runFullSweep();
+      else tickTopbarUI(persistedState, schedule);
+    });
     const storedSchedule = await webext.storage.local.get(SCHEDULE_KEY).catch(() => ({}));
-    schedule = storedSchedule[SCHEDULE_KEY] ?? EMPTY_SCHEDULE;
+    if (!scheduleChanged) schedule = storedSchedule[SCHEDULE_KEY] ?? EMPTY_SCHEDULE;
     attachModalInputBlocker();
     attachShortClickInterceptor();
     attachDocumentMediaListeners();
@@ -2133,13 +2149,6 @@
     }, 1e3);
     webext.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
-      if (changes[SCHEDULE_KEY]) {
-        const wasEnabled = schedule.enabled;
-        schedule = changes[SCHEDULE_KEY].newValue ?? EMPTY_SCHEDULE;
-        if (schedule.enabled && !wasEnabled) publishScheduleSample();
-        if (scheduleRestrictsAccess() !== scheduleBlocked) runFullSweep();
-        else tickTopbarUI(persistedState, schedule);
-      }
       if (changes[STATE_KEY]?.newValue) {
         persistedState = changes[STATE_KEY].newValue;
         runFullSweep();
@@ -2149,6 +2158,7 @@
       if (scheduleRestrictsAccess() !== scheduleBlocked) runFullSweep();
       publishScheduleSample();
     };
+    scheduleReady = true;
     refreshSchedule();
     scheduleHeartbeat = window.setInterval(refreshSchedule, 1e3);
     document.addEventListener("visibilitychange", refreshSchedule);

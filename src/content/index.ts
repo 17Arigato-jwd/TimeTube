@@ -1449,9 +1449,22 @@ async function mountYouTubeFilterHost(): Promise<void> {
     persistedState = { ...INITIAL_PERSISTED_STATE };
   }
 
+  let scheduleChanged = false;
+  let scheduleReady = false;
+  webext.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes[SCHEDULE_KEY]) return;
+    scheduleChanged = true;
+    const wasEnabled = schedule.enabled;
+    schedule = (changes[SCHEDULE_KEY].newValue as ScheduleState | undefined) ?? EMPTY_SCHEDULE;
+    if (!scheduleReady) return;
+    if (schedule.enabled && !wasEnabled) publishScheduleSample();
+    if (scheduleRestrictsAccess() !== scheduleBlocked) runFullSweep();
+    else tickTopbarUI(persistedState, schedule);
+  });
+
   const storedSchedule = await webext.storage.local.get<{ [SCHEDULE_KEY]?: ScheduleState }>(SCHEDULE_KEY)
     .catch(() => ({} as { [SCHEDULE_KEY]?: ScheduleState }));
-  schedule = storedSchedule[SCHEDULE_KEY] ?? EMPTY_SCHEDULE;
+  if (!scheduleChanged) schedule = storedSchedule[SCHEDULE_KEY] ?? EMPTY_SCHEDULE;
 
   attachModalInputBlocker();
   attachShortClickInterceptor();
@@ -1523,13 +1536,6 @@ async function mountYouTubeFilterHost(): Promise<void> {
 
   webext.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (changes[SCHEDULE_KEY]) {
-      const wasEnabled = schedule.enabled;
-      schedule = (changes[SCHEDULE_KEY].newValue as ScheduleState | undefined) ?? EMPTY_SCHEDULE;
-      if (schedule.enabled && !wasEnabled) publishScheduleSample();
-      if (scheduleRestrictsAccess() !== scheduleBlocked) runFullSweep();
-      else tickTopbarUI(persistedState, schedule);
-    }
     if (changes[STATE_KEY]?.newValue) {
       persistedState = changes[STATE_KEY].newValue as PersistedSessionState;
       runFullSweep();
@@ -1540,6 +1546,7 @@ async function mountYouTubeFilterHost(): Promise<void> {
     if (scheduleRestrictsAccess() !== scheduleBlocked) runFullSweep();
     publishScheduleSample();
   };
+  scheduleReady = true;
   refreshSchedule();
   scheduleHeartbeat = window.setInterval(refreshSchedule, 1000);
   document.addEventListener('visibilitychange', refreshSchedule);

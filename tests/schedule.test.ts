@@ -180,3 +180,76 @@ test('the conflict notice and grant stop at the reset boundary', () => {
   assert.equal(getScheduleStrip(result.schedule, now).budget?.remainingMs, 120_000);
   assert.equal(getScheduleStrip(result.schedule, local(24, 0)).budget?.remainingMs, 60_000);
 });
+
+test('overnight migration preserves the larger confirmed allowance', () => {
+  const now = local(24, 0, 10);
+  for (const targetLimit of [undefined, 70 * 60_000]) {
+    const raw = {
+      ...schedule,
+      version: undefined,
+      rules: [{ ...rule, days: [1, 2] }],
+      usage: {
+        '2026-11-23': { usedMs: 50 * 60_000, recent: [], extra: { closesAt: local(24, 1), limitMs: 60 * 60_000 } },
+        '2026-11-24': { usedMs: 0, recent: [], limitOverrideMs: targetLimit },
+      },
+    };
+    assert.equal(getScheduleStrip(migrateSchedule(raw, now), now).budget?.remainingMs,
+      (targetLimit ?? 60 * 60_000) - 50 * 60_000);
+  }
+});
+
+test('an unused legacy overnight allowance stays usable and tracked on an unassigned day', () => {
+  const now = local(24, 0, 10);
+  const raw = { ...schedule, version: undefined };
+  const migrated = migrateSchedule(raw, now);
+  assert.equal(getScheduleStrip(migrated, now).budget?.remainingMs, 45 * 60_000);
+  const next = recordUsage(migrated, now, now + 1000);
+  assert.equal(getScheduleStrip(next, now + 1000).budget?.remainingMs, 45 * 60_000 - 1000);
+  assert.equal(getScheduleStatus(next, local(24, 1)).kind, 'unassigned');
+});
+
+test('schedule messages recover failed charges and toggle the latest rules from storage', async (t) => {
+  let stored: ScheduleState = {
+    ...schedule,
+    version: 2,
+    rules: [{ ...rule, windowEnabled: false }],
+  };
+  let failWrite = false;
+  t.mock.method(Date, 'now', () => now);
+  let now = local(23, 22);
+  Object.defineProperty(globalThis, 'chrome', {
+    configurable: true,
+    value: { storage: { local: {
+      get: async () => ({ timeTubeSchedule: stored }),
+      set: async ({ timeTubeSchedule }: { timeTubeSchedule: ScheduleState }) => {
+        if (failWrite) throw new Error('storage unavailable');
+        stored = timeTubeSchedule;
+      },
+    } } },
+  });
+  t.after(() => { Reflect.deleteProperty(globalThis, 'chrome'); });
+  const { runScheduleMessage } = await import('../src/background/schedule');
+  const noManualStart = async () => assert.fail('unexpected manual start');
+  const sender = { tab: { id: 1 } };
+  const sample = () => runScheduleMessage(
+    { type: 'SCHEDULE_SAMPLE', documentId: 'document', visible: false, playing: true }, sender, noManualStart,
+  );
+
+  await sample();
+  now += 1000;
+  failWrite = true;
+  await assert.rejects(sample(), /storage unavailable/);
+  now += 1000;
+  failWrite = false;
+  await sample();
+  assert.equal(stored.usage['2026-11-23']?.usedMs, 2000);
+
+  await runScheduleMessage({ type: 'SAVE_SCHEDULE', enabled: false }, undefined, noManualStart);
+  assert.equal(stored.enabled, false);
+  assert.equal(stored.rules[0]?.windowEnabled, false);
+  await runScheduleMessage({ type: 'SAVE_SCHEDULE', enabled: true }, undefined, noManualStart);
+  assert.equal(stored.enabled, true);
+  assert.equal(stored.rules[0]?.windowEnabled, false);
+  await runScheduleMessage({ type: 'SAVE_SCHEDULE', enabled: false, rules: [] }, undefined, noManualStart);
+  assert.deepEqual(stored.rules, []);
+});

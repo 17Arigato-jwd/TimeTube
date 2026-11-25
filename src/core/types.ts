@@ -136,7 +136,7 @@ export const INITIAL_PERSISTED_STATE: PersistedSessionState = {
 export type RuntimeMessage =
   | { type: 'GET_STATE' }
   | { type: 'OPEN_SCHEDULE_SETTINGS' }
-  | { type: 'SAVE_SCHEDULE'; enabled: boolean; rules: ScheduleRule[] }
+  | { type: 'SAVE_SCHEDULE'; enabled: boolean; rules?: ScheduleRule[] }
   | { type: 'SCHEDULE_SAMPLE'; documentId: string; visible: boolean; playing: boolean }
   | { type: 'START_SCHEDULED_SESSION'; spec: BudgetSpec; choice?: ScheduleChoice }
   | { type: 'EXTEND_SESSION'; additionalMinutes: number }

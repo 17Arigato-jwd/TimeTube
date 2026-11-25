@@ -267,7 +267,7 @@ enabled.onchange = async () => {
   rules = [...saved.rules];
   renderRules();
   closeEditor(false);
-  await persist(turnOn, rules, turnOn ? "Schedule enabled" : "Schedule disabled", true);
+  await persist(turnOn, void 0, turnOn ? "Schedule enabled" : "Schedule disabled");
   enabled.focus();
 };
 cancel.onclick = () => {
@@ -290,7 +290,7 @@ for (const button of editor.querySelectorAll("button[data-days]")) {
     saveStatus.textContent = "Unsaved changes";
   };
 }
-async function persist(turnOn, nextRules, message, restoreOnFailure = false) {
+async function persist(turnOn, nextRules, message) {
   setError("schedule-save-error");
   const main = document.querySelector("main");
   main.inert = true;
@@ -305,7 +305,7 @@ async function persist(turnOn, nextRules, message, restoreOnFailure = false) {
     restoreDraft();
     saveStatus.textContent = message;
   } catch {
-    if (restoreOnFailure) restoreDraft();
+    if (nextRules === void 0) restoreDraft();
     setError("schedule-save-error", "Could not save the schedule. Try again.");
   } finally {
     main.inert = false;
