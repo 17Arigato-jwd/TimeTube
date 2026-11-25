@@ -1,3 +1,4 @@
+import { bindScheduleStrip } from '../shared/schedule-strip';
 import {
   EMPTY_SCHEDULE, getScheduleStatus, resolveScheduledStart, SCHEDULE_KEY,
   type ScheduleChoice, type ScheduledStart, type ScheduledStartResponse, type ScheduleState,
@@ -11,8 +12,7 @@ let conflictKey: string | null = null;
 let conflictUntil: number | undefined;
 let pending = false;
 
-const statusLabel = document.querySelector<HTMLElement>('#schedule-status')!;
-const detailLabel = document.querySelector<HTMLElement>('#schedule-detail')!;
+const renderStrip = bindScheduleStrip(document.querySelector<HTMLElement>('#schedule-strip')!);
 const editButton = document.querySelector<HTMLButtonElement>('#schedule-open')!;
 const dialog = document.querySelector<HTMLDialogElement>('#schedule-conflict')!;
 const summary = document.querySelector<HTMLElement>('#conflict-summary')!;
@@ -28,10 +28,6 @@ function duration(ms: number): string {
   const remainder = seconds % 60;
   if (!minutes) return `${seconds} sec`;
   return remainder ? `${minutes} min ${remainder} sec` : `${minutes} min`;
-}
-
-function time(ms: number): string {
-  return new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
 function showError(message: string): void {
@@ -62,7 +58,7 @@ function renderConflict(result: ScheduledStart): void {
   shorten.disabled = extend.disabled = pending;
   summary.textContent = `${duration(result.requestedMs)} requested. ${duration(result.availableMs)} fits under ${result.extraUsageMs && result.extraWindowMs ? 'the daily limit and closing time' : result.extraUsageMs ? 'the daily limit' : 'the closing time'}.`;
   const adjustments = [];
-  if (result.extraUsageMs) adjustments.push(`${duration(result.extraUsageMs)} to this window’s allowance`);
+  if (result.extraUsageMs) adjustments.push(`${duration(result.extraUsageMs)} to this daily allowance`);
   if (result.extraWindowMs) adjustments.push(`${duration(result.extraWindowMs)} to its closing time`);
   extra.textContent = `Add ${adjustments.join(' and ')} for this occurrence only.`;
 }
@@ -70,25 +66,7 @@ function renderConflict(result: ScheduledStart): void {
 export function renderSchedule(): boolean {
   const now = Date.now();
   const status = getScheduleStatus(schedule, now);
-  const restricted = status.kind === 'closed' || status.kind === 'spent';
-  editButton.textContent = schedule.rules.length ? 'Edit schedule' : 'Set up schedule';
-  detailLabel.textContent = '';
-  if (status.kind === 'open') {
-    statusLabel.textContent = `${duration(status.remainingMs)} remaining`;
-    const sameDay = new Date(now).toDateString() === new Date(status.closesAt).toDateString();
-    const closingDay = new Date(status.closesAt).toLocaleDateString(undefined, { weekday: 'long' });
-    detailLabel.textContent = sameDay
-      ? `Until ${time(status.closesAt)}`
-      : `Until ${closingDay} at ${time(status.closesAt)}`;
-  } else if (status.kind === 'closed' || status.kind === 'spent') {
-    statusLabel.textContent = status.kind === 'spent' ? 'Time up' : 'Access restricted';
-    if (status.nextOpen !== null) {
-      const day = new Date(status.nextOpen).toLocaleDateString(undefined, { weekday: 'long' });
-      detailLabel.textContent = `Access resumes ${day} at ${time(status.nextOpen)}`;
-    }
-  } else {
-    statusLabel.textContent = status.kind === 'off' ? 'Schedule off' : 'No rule today';
-  }
+  const restricted = renderStrip(schedule, now, status);
   if (dialog.open && pendingSpec) {
     if (conflictUntil !== undefined && conflictUntil <= now) {
       summary.textContent = 'The requested end time has passed.';

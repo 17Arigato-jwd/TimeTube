@@ -281,6 +281,9 @@ async function handleMessage(msg: RuntimeMessage): Promise<unknown> {
   const nowMs = Date.now();
 
   switch (msg.type) {
+    case 'OPEN_SCHEDULE_SETTINGS':
+      await webext.runtime.openOptionsPage();
+      return {};
     case 'GET_STATE': {
       if (shouldAutoResetExpiredSession(state, nowMs, EXPIRED_AUTO_RESET_MS)) {
         return finalizeExpiredAutoReset(state, nowMs);

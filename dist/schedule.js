@@ -1,7 +1,7 @@
 // src/core/schedule.ts
 var SCHEDULE_KEY = "timeTubeSchedule";
 var DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-var EMPTY_SCHEDULE = { enabled: false, rules: [], usage: {} };
+var EMPTY_SCHEDULE = { version: 2, enabled: false, rules: [], usage: {} };
 function ruleLabel(days) {
   const ordered = [1, 2, 3, 4, 5, 6, 0].filter((day) => days.includes(day));
   if (ordered.length === 7) return "Every day";
@@ -24,9 +24,12 @@ function validateSchedule(enabled2, rules2) {
       owners.set(day, rule);
     }
     const time = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
-    if (!time.test(rule.start) || !time.test(rule.end) || rule.start === rule.end) {
+    if (rule.windowEnabled === false && rule.limitEnabled === false) throw new Error("Select an access window or daily limit.");
+    if (rule.windowEnabled !== false && (!time.test(rule.start) || !time.test(rule.end) || rule.start === rule.end)) {
       throw new Error("Choose different start and end times.");
     }
+    if (rule.limitEnabled === false) continue;
+    if (!time.test(rule.resetTime ?? "00:00")) throw new Error("Choose a valid daily reset time.");
     if (!Number.isInteger(rule.limitMinutes) || rule.limitMinutes < 1 || rule.limitMinutes > 1440) {
       throw new Error("Enter a daily limit between 1 and 1,440 minutes.");
     }
@@ -39,6 +42,14 @@ var rawApi = globalThis.browser ?? globalThis.chrome;
 var webext = rawApi;
 
 // src/options/index.ts
+var weekly = document.querySelector("#weekly-rules");
+var windowEnabled = document.querySelector("#window-enabled");
+var limitEnabled = document.querySelector("#limit-enabled");
+var windowFields = document.querySelector("#window-fields");
+var limitFields = document.querySelector("#limit-fields");
+var resetTime = document.querySelector("#rule-reset");
+var removeDialog = document.querySelector("#remove-dialog");
+var removeDescription = document.querySelector("#remove-description");
 var enabled = document.querySelector("#enabled");
 var rulesList = document.querySelector("#rules");
 var empty = document.querySelector("#empty-rules");
@@ -90,13 +101,24 @@ function renderRules() {
     const details = document.createElement("span");
     const button = document.createElement("button");
     name.textContent = ruleLabel(rule.days);
-    details.textContent = `${formatTime(rule.start)}\u2013${formatTime(rule.end)}${rule.end < rule.start ? " next day" : ""} \xB7 ${rule.limitMinutes} min per day \xB7 ${rule.mode === "site" ? "Time on YouTube" : "Active playback"}`;
+    const parts = [];
+    if (rule.windowEnabled !== false) {
+      parts.push(`${formatTime(rule.start)}\u2013${formatTime(rule.end)}${rule.end < rule.start ? " next day" : ""}`);
+    }
+    if (rule.limitEnabled !== false) {
+      parts.push(
+        `${rule.limitMinutes} min per day`,
+        `Resets at ${formatTime(rule.resetTime ?? "00:00")}`,
+        rule.mode === "site" ? "Time on YouTube" : "Active playback"
+      );
+    }
+    details.textContent = parts.join(" \xB7 ");
     button.type = "button";
     button.className = "tt-pill-btn tt-pill-tonal";
     button.dataset.ruleId = rule.id;
     button.textContent = "Edit";
     button.setAttribute("aria-label", `Edit ${name.textContent} rule`);
-    button.disabled = editing !== null;
+    button.disabled = !enabled.checked || editing !== null;
     button.onclick = () => openEditor(rule);
     description.append(name, details);
     row.append(description, button);
@@ -104,23 +126,39 @@ function renderRules() {
   }
 }
 function refreshEditor() {
-  overnight.hidden = !(start.value && end.value && end.value < start.value);
+  windowFields.disabled = !windowEnabled.checked;
+  limitFields.disabled = !limitEnabled.checked;
+  setError("sections-error");
+  setError("reset-error");
+  setError("time-error");
+  setError("limit-error");
+  const checked = dayInputs.filter((input) => input.checked).map((input) => input.value);
+  for (const button of editor.querySelectorAll("button[data-days]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.days === checked.join(",")));
+  }
+  overnight.hidden = !(windowEnabled.checked && start.value && end.value && end.value < start.value);
   const taken = rules.find((rule) => rule.id !== editing && dayInputs.some((input) => input.checked && rule.days.includes(Number(input.value))));
   const conflict = dayInputs.find((input) => input.checked && taken?.days.includes(Number(input.value)));
   setError("days-error", taken && conflict ? `${DAY_NAMES[Number(conflict.value)]} already belongs to the ${ruleLabel(taken.days)} rule.` : "");
 }
 function openEditor(rule) {
+  if (!enabled.checked) return;
   editing = rule?.id ?? crypto.randomUUID();
   editorTitle.textContent = rule ? `Edit ${ruleLabel(rule.days)}` : "Add rule";
   remove.hidden = !rule;
+  remove.disabled = false;
   for (const input of dayInputs) input.checked = rule?.days.includes(Number(input.value)) ?? false;
   start.value = rule?.start ?? "17:00";
   end.value = rule?.end ?? "21:00";
+  windowEnabled.checked = rule ? rule.windowEnabled !== false : false;
+  limitEnabled.checked = rule?.limitEnabled !== false;
+  resetTime.value = rule?.resetTime ?? "00:00";
   limit.value = String(rule?.limitMinutes ?? 45);
   const mode = editor.elements.namedItem("mode");
   mode.value = rule?.mode ?? "site";
   setError("time-error");
   setError("limit-error");
+  saveStatus.textContent = "";
   refreshEditor();
   editor.classList.remove("hidden");
   add.disabled = true;
@@ -131,11 +169,13 @@ function closeEditor(returnFocus = true) {
   const previous = editing;
   editing = null;
   editor.classList.add("hidden");
-  add.disabled = false;
-  for (const button of rulesList.querySelectorAll("button")) button.disabled = false;
+  add.disabled = !enabled.checked;
+  remove.disabled = !enabled.checked;
+  weekly.classList.toggle("tt-rules-disabled", !enabled.checked);
+  for (const button of rulesList.querySelectorAll("button")) button.disabled = !enabled.checked;
   if (returnFocus) {
     const button = [...rulesList.querySelectorAll("button")].find((item) => item.dataset.ruleId === previous);
-    (button ?? add).focus();
+    (enabled.checked ? button ?? add : enabled).focus();
   }
 }
 function applyRule() {
@@ -147,20 +187,40 @@ function applyRule() {
     (dayInputs.find((input) => input.checked) ?? dayInputs[0])?.focus();
     return false;
   }
-  const timesValid = start.value && end.value && start.value !== end.value;
+  if (!windowEnabled.checked && !limitEnabled.checked) {
+    setError("sections-error", "Select an access window, a daily limit, or both.");
+    windowEnabled.focus();
+    return false;
+  }
+  const timesValid = !windowEnabled.checked || start.value && end.value && start.value !== end.value;
   setError("time-error", timesValid ? "" : "Choose different start and end times.");
   if (!timesValid) {
     (start.value ? end : start).focus();
     return false;
   }
-  const limitValid = limit.validity.valid;
+  const limitValid = !limitEnabled.checked || limit.validity.valid;
   setError("limit-error", limitValid ? "" : "Enter a daily limit between 1 and 1,440 minutes.");
   if (!limitValid) {
     limit.focus();
     return false;
   }
+  if (limitEnabled.checked && !resetTime.validity.valid) {
+    setError("reset-error", "Choose a daily reset time.");
+    resetTime.focus();
+    return false;
+  }
   const mode = editor.elements.namedItem("mode").value;
-  const next = { id: editing, days, start: start.value, end: end.value, limitMinutes: limit.valueAsNumber, mode };
+  const next = {
+    id: editing,
+    days,
+    mode,
+    windowEnabled: windowEnabled.checked,
+    start: start.value || "17:00",
+    end: end.value || "21:00",
+    limitEnabled: limitEnabled.checked,
+    limitMinutes: limit.validity.valid && Number.isFinite(limit.valueAsNumber) ? limit.valueAsNumber : 45,
+    resetTime: resetTime.value || "00:00"
+  };
   rules = rules.some((rule) => rule.id === editing) ? rules.map((rule) => rule.id === editing ? next : rule) : [...rules, next];
   saveStatus.textContent = "Unsaved changes";
   renderRules();
@@ -175,21 +235,49 @@ function restoreDraft() {
   setError("schedule-save-error");
 }
 add.onclick = () => openEditor();
-cancelRule.onclick = () => closeEditor();
+cancelRule.onclick = () => {
+  if (!saved.enabled && !rules.length) enabled.checked = false;
+  closeEditor();
+  saveStatus.textContent = JSON.stringify(rules) === JSON.stringify(saved.rules) ? "" : "Unsaved changes";
+};
 remove.onclick = () => {
+  const rule = rules.find((item) => item.id === editing);
+  if (!rule || !enabled.checked) return;
+  removeDescription.textContent = `Remove the ${ruleLabel(rule.days)} rule? Save the schedule to apply this change.`;
+  removeDialog.returnValue = "";
+  removeDialog.showModal();
+};
+removeDialog.addEventListener("close", () => {
+  if (removeDialog.returnValue !== "remove") {
+    remove.focus();
+    return;
+  }
   rules = rules.filter((rule) => rule.id !== editing);
   saveStatus.textContent = "Unsaved changes";
   renderRules();
   closeEditor();
-};
-enabled.onchange = () => {
-  saveStatus.textContent = "Unsaved changes";
+});
+enabled.onchange = async () => {
+  const turnOn = enabled.checked;
+  if (turnOn && !saved.rules.length) {
+    weekly.classList.remove("tt-rules-disabled");
+    openEditor();
+    return;
+  }
+  rules = [...saved.rules];
+  renderRules();
+  closeEditor(false);
+  await persist(turnOn, rules, turnOn ? "Schedule enabled" : "Schedule disabled", true);
+  enabled.focus();
 };
 cancel.onclick = () => {
   restoreDraft();
   saveStatus.textContent = "Changes discarded";
 };
-editor.addEventListener("input", refreshEditor);
+editor.addEventListener("input", () => {
+  saveStatus.textContent = "Unsaved changes";
+  refreshEditor();
+});
 editor.addEventListener("submit", (event) => {
   event.preventDefault();
   applyRule();
@@ -199,41 +287,49 @@ for (const button of editor.querySelectorAll("button[data-days]")) {
     const days = button.dataset.days.split(",");
     for (const input of dayInputs) input.checked = days.includes(input.value);
     refreshEditor();
+    saveStatus.textContent = "Unsaved changes";
   };
+}
+async function persist(turnOn, nextRules, message, restoreOnFailure = false) {
+  setError("schedule-save-error");
+  const main = document.querySelector("main");
+  main.inert = true;
+  try {
+    const result = await webext.runtime.sendMessage({
+      type: "SAVE_SCHEDULE",
+      enabled: turnOn,
+      rules: nextRules
+    });
+    if ("error" in result) throw new Error(result.error);
+    saved = result;
+    restoreDraft();
+    saveStatus.textContent = message;
+  } catch {
+    if (restoreOnFailure) restoreDraft();
+    setError("schedule-save-error", "Could not save the schedule. Try again.");
+  } finally {
+    main.inert = false;
+  }
 }
 save.onclick = async () => {
   if (!applyRule()) return;
-  setError("schedule-save-error");
+  const turnOn = enabled.checked && rules.length > 0;
   try {
-    validateSchedule(enabled.checked, rules);
+    validateSchedule(turnOn, rules);
   } catch (error) {
     setError("schedule-save-error", error.message);
     enabled.focus();
     return;
   }
-  save.disabled = true;
-  try {
-    const result = await webext.runtime.sendMessage({
-      type: "SAVE_SCHEDULE",
-      enabled: enabled.checked,
-      rules
-    });
-    if ("error" in result) throw new Error(result.error);
-    saved = result;
-    restoreDraft();
-    saveStatus.textContent = "Schedule saved";
-  } catch {
-    setError("schedule-save-error", "Could not save the schedule. Try again.");
-  } finally {
-    save.disabled = false;
-  }
+  await persist(turnOn, rules, "Schedule saved");
+  save.focus();
 };
 async function init() {
   try {
     const stored = await webext.storage.local.get(SCHEDULE_KEY);
     saved = stored[SCHEDULE_KEY] ?? EMPTY_SCHEDULE;
     restoreDraft();
-    for (const control of [enabled, add, save, cancel]) control.disabled = false;
+    for (const control of [enabled, save, cancel]) control.disabled = false;
   } catch {
     setError("schedule-save-error", "Could not load the schedule. Reopen settings to try again.");
   }

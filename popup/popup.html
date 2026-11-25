@@ -16,6 +16,24 @@
       <span id="status-pill" class="tt-status tt-status-idle">Off</span>
     </header>
 
+    <section id="schedule-strip" data-schedule-strip aria-label="Schedule status" hidden>
+      <div id="schedule-budget" data-schedule-budget class="tt-budget-line" hidden>
+        <strong id="schedule-status" data-schedule-status></strong>
+        <span id="schedule-paused" data-schedule-paused hidden>Paused</span>
+        <span id="schedule-reset" data-schedule-reset></span>
+      </div>
+      <div id="schedule-window" data-schedule-window hidden>
+        <div class="tt-window-labels" aria-hidden="true">
+          <span id="window-start" data-window-start></span>
+          <strong id="window-now" data-window-now></strong>
+          <span id="window-end" data-window-end></span>
+        </div>
+        <div id="window-progress" data-window-progress role="progressbar" aria-label="Scheduled access window"
+             aria-valuemin="0" aria-valuemax="100"></div>
+      </div>
+      <div id="schedule-detail" data-schedule-detail hidden></div>
+    </section>
+
     <section id="active-banner" class="tt-active-strip hidden">
       <div class="tt-active-meta">
         <span class="tt-caption">Time remaining</span>
@@ -25,15 +43,6 @@
         <button id="extend-btn" type="button" class="tt-pill-btn tt-pill-tonal">+5 min</button>
         <button id="stop-btn" type="button" class="tt-pill-btn tt-pill-danger">Stop</button>
       </div>
-    </section>
-
-    <section class="tt-section tt-schedule" aria-labelledby="schedule-heading">
-      <h2 id="schedule-heading" class="tt-section-label">Today’s schedule</h2>
-      <div>
-        <strong id="schedule-status">Loading schedule…</strong>
-        <div id="schedule-detail" class="tt-caption"></div>
-      </div>
-      <button id="schedule-open" type="button" class="tt-pill-btn tt-pill-tonal">Set up schedule</button>
     </section>
 
     <div id="session-setup" class="hidden">
@@ -120,6 +129,10 @@
         </span>
       </label>
     </section>
+    <button id="schedule-open" class="tt-schedule-link" type="button">
+      <strong>Schedule</strong>
+      <span class="tt-material-chevron" aria-hidden="true"></span>
+    </button>
   </main>
 
   <dialog id="schedule-conflict" class="tt-conflict" aria-labelledby="conflict-title" aria-describedby="conflict-summary">

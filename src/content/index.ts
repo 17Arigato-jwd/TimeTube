@@ -100,15 +100,15 @@ function scheduleRestrictsAccess(): boolean {
   return kind === 'closed' || kind === 'spent';
 }
 
-function publishScheduleSample(): void {
+function publishScheduleSample(leaving = false): void {
   if (!schedule.enabled) return;
   lastScheduleSampleAt = Date.now();
   const video = getActivePlayerVideo();
   webext.runtime.sendMessage({
     type: 'SCHEDULE_SAMPLE',
     documentId: scheduleDocumentId,
-    visible: !document.hidden && !expiredScreenRendered,
-    playing: Boolean(video && !video.paused && !video.ended && !video.seeking && video.readyState >= 3),
+    visible: !leaving && !document.hidden && !expiredScreenRendered,
+    playing: !leaving && Boolean(video && !video.paused && !video.ended && !video.seeking && video.readyState >= 3),
   }).catch(() => undefined);
 }
 
@@ -1275,6 +1275,7 @@ function runFullSweep(): void {
   syncShortsNavVisibility();
   syncTopbarControl(
     persistedState,
+    schedule,
     (next) => {
       persistedState = next;
       snoozedUntilReloadOrPopup = false;
@@ -1463,7 +1464,7 @@ async function mountYouTubeFilterHost(): Promise<void> {
 
   topbarTickInterval = window.setInterval(() => {
     if (document.hidden || expiredScreenRendered) return;
-    tickTopbarUI(persistedState);
+    tickTopbarUI(persistedState, schedule);
     const snap = getCurrentSnapshot();
     if (snap.status === 'active' && snap.remainingMs !== null && snap.remainingMs > 0) {
       if (snap.remainingMs <= 30_000) {
@@ -1483,6 +1484,7 @@ async function mountYouTubeFilterHost(): Promise<void> {
       schedule = (changes[SCHEDULE_KEY].newValue as ScheduleState | undefined) ?? EMPTY_SCHEDULE;
       if (schedule.enabled && !wasEnabled) publishScheduleSample();
       if (scheduleRestrictsAccess() !== scheduleBlocked) runFullSweep();
+      else tickTopbarUI(persistedState, schedule);
     }
     if (changes[STATE_KEY]?.newValue) {
       persistedState = changes[STATE_KEY].newValue as PersistedSessionState;
@@ -1521,7 +1523,7 @@ async function mountYouTubeFilterHost(): Promise<void> {
     if (event.persisted) refreshSchedule();
   });
   window.addEventListener('pagehide', (event) => {
-    publishScheduleSample();
+    publishScheduleSample(true);
     if (event.persisted) return;
     if (scheduleHeartbeat !== null) window.clearInterval(scheduleHeartbeat);
     if (sweepTimer !== null) window.clearInterval(sweepTimer);

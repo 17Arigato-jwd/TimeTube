@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  EMPTY_SCHEDULE, getScheduleStatus, recordUsage, resolveScheduledStart, validateSchedule, type ScheduleState,
+  EMPTY_SCHEDULE, getScheduleStatus, getScheduleStrip, migrateSchedule, updateCounting, recordUsage, resolveScheduledStart, validateSchedule, type ScheduleState,
 } from '../src/core/schedule';
 
 const rule = { id: 'night', days: [1], start: '22:00', end: '01:00', limitMinutes: 45, mode: 'playback' as const };
@@ -13,7 +13,7 @@ test('an overnight occurrence belongs to the day the window starts', () => {
   const current = getScheduleStatus(schedule, local(24, 0, 30));
   assert.equal(current.kind, 'open');
   if (current.kind !== 'open') return;
-  assert.equal(current.key, '2026-11-23');
+  assert.equal(current.opensAt, local(23, 22));
   assert.equal(current.closesAt, local(24, 1));
   assert.equal(getScheduleStatus(schedule, local(24, 1)).kind, 'unassigned');
 });
@@ -57,7 +57,7 @@ test('a spent daily limit stays restricted until the next eligible occurrence', 
     next = recordUsage(next, start + second * 1000, start + (second + 1) * 1000);
   }
   assert.deepEqual(getScheduleStatus(next, start + 60_000), {
-    kind: 'spent', nextOpen: local(24, 22),
+    kind: 'spent', nextOpen: local(24, 0),
   });
   assert.equal(getScheduleStatus(next, local(24, 22)).kind, 'open');
 });
@@ -86,4 +86,97 @@ test('the next unrestricted day resumes access before a later weekly window', ()
   assert.deepEqual(getScheduleStatus(monday, local(23, 21)), {
     kind: 'closed', nextOpen: local(24, 0),
   });
+});
+
+test('a Monday budget starts at its reset time and runs until Tuesday at that time', () => {
+  const budget = { ...rule, windowEnabled: false, resetTime: '04:00' };
+  const state = { ...schedule, rules: [budget] };
+  assert.equal(getScheduleStatus(state, local(23, 3, 59)).kind, 'unassigned');
+  assert.equal(getScheduleStatus(state, local(23, 4)).kind, 'open');
+  assert.deepEqual(getScheduleStrip(state, local(24, 3, 59)), {
+    budget: { remainingMs: 45 * 60_000, resetsAt: local(24, 4), counting: false },
+  });
+  assert.equal(getScheduleStatus(state, local(24, 4)).kind, 'unassigned');
+});
+
+test('inactive section fields are optional; both inactive sections are invalid', () => {
+  assert.doesNotThrow(() => validateSchedule(true, [{ ...rule, windowEnabled: false, start: '', end: '' }]));
+  assert.doesNotThrow(() => validateSchedule(true, [{ ...rule, limitEnabled: false, limitMinutes: 0, resetTime: '' }]));
+  assert.throws(() => validateSchedule(true, [{ ...rule, windowEnabled: false, limitEnabled: false }]));
+  assert.throws(() => validateSchedule(true, [{ ...rule, resetTime: '25:99' }]));
+});
+
+test('usage samples split across reset boundaries inside an overnight window', () => {
+  const state = { ...schedule, rules: [{ ...rule, days: [1, 2], resetTime: '00:30' }] };
+  const reset = local(24, 0, 30);
+  const next = recordUsage(state, reset - 1000, reset + 2000);
+  assert.equal(next.usage['2026-11-23']?.usedMs, 1000);
+  assert.equal(next.usage['2026-11-24']?.usedMs, 2000);
+  const view = getScheduleStrip(next, reset + 2000);
+  assert.equal(view.budget?.resetsAt, local(25, 0, 30));
+  assert.equal(view.window?.opensAt, local(23, 22));
+  assert.equal(view.window?.closesAt, local(24, 1));
+});
+
+test('a window-only rule measures no daily usage and limits only the closing time', () => {
+  const state = { ...schedule, rules: [{ ...rule, limitEnabled: false, limitMinutes: 1 }] };
+  const now = local(23, 22);
+  assert.equal(recordUsage(state, now, now + 1000), state);
+  assert.equal(getScheduleStrip(state, now).budget, undefined);
+  const request = { mode: 'countdown' as const, durationMinutes: 30 };
+  assert.equal(resolveScheduledStart(state, request, now).kind, 'start');
+  const conflict = resolveScheduledStart(state, request, local(24, 0, 59));
+  assert.equal(conflict.kind === 'conflict' && conflict.extraUsageMs, 0);
+});
+
+test('playback budgets pause, resume, and expire stale activity', () => {
+  const now = local(23, 22);
+  const paused = { visible: true, playing: false };
+  const playing = { visible: false, playing: true };
+  assert.equal(recordUsage(schedule, now, now + 1000, paused), schedule);
+  const active = updateCounting(schedule, now, [paused, playing]);
+  assert.equal(getScheduleStrip(active, now).budget?.counting, true);
+  assert.equal(getScheduleStrip(active, now + 3000).budget?.counting, false);
+  const idle = updateCounting(active, now + 100, [paused]);
+  assert.equal(getScheduleStrip(idle, now + 100).budget?.counting, false);
+});
+
+test('legacy migration carries a live overnight balance exactly once', () => {
+  const now = local(24, 0, 10);
+  const usage = { '2026-11-23': { usedMs: 40 * 60_000, recent: [] } };
+  const raw = { enabled: true, rules: [{ ...rule, days: [1, 2] }], usage };
+  const migrated = migrateSchedule(raw, now);
+  assert.equal(getScheduleStrip(migrated, now).budget?.remainingMs, 5 * 60_000);
+  assert.equal(migrateSchedule(migrated, now), migrated);
+  const unassignedTuesday = migrateSchedule({ ...raw, rules: [rule] }, now);
+  assert.equal(getScheduleStrip(unassignedTuesday, now).budget?.remainingMs, 5 * 60_000);
+  assert.equal(getScheduleStatus(unassignedTuesday, local(24, 1)).kind, 'unassigned');
+});
+
+test('an exception for one budget period cannot enlarge the next period', () => {
+  const state = { ...schedule, rules: [{ ...rule, days: [1, 2], windowEnabled: false, limitMinutes: 2 }] };
+  const now = local(23, 22);
+  const spec = { mode: 'countdown' as const, durationMinutes: 10 };
+  const conflict = resolveScheduledStart(state, spec, now);
+  assert.equal(conflict.kind, 'conflict');
+  if (conflict.kind !== 'conflict') return;
+  assert.equal(conflict.extraWindowMs, 0);
+  const started = resolveScheduledStart(state, spec, now, { action: 'extra', key: conflict.key });
+  if (started.kind !== 'start') assert.fail('expected a confirmed start');
+  assert.equal(getScheduleStrip(started.schedule, now).budget?.remainingMs, 10 * 60_000);
+  assert.equal(getScheduleStrip(started.schedule, local(24, 0)).budget?.remainingMs, 2 * 60_000);
+});
+
+test('the conflict notice and grant stop at the reset boundary', () => {
+  const now = local(23, 23, 58);
+  const state = { ...schedule, rules: [{ ...rule, days: [1, 2], windowEnabled: false, limitMinutes: 1 }] };
+  const spec = { mode: 'countdown' as const, durationMinutes: 10 };
+  const conflict = resolveScheduledStart(state, spec, now);
+  if (conflict.kind !== 'conflict') assert.fail('expected a conflict');
+  assert.equal(conflict.availableMs, 60_000);
+  assert.equal(conflict.extraUsageMs, 60_000);
+  const result = resolveScheduledStart(state, spec, now, { action: 'extra', key: conflict.key });
+  if (result.kind !== 'start') assert.fail('expected a confirmed start');
+  assert.equal(getScheduleStrip(result.schedule, now).budget?.remainingMs, 120_000);
+  assert.equal(getScheduleStrip(result.schedule, local(24, 0)).budget?.remainingMs, 60_000);
 });

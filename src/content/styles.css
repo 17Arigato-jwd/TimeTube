@@ -706,3 +706,88 @@ html[data-ytb-hide-endscreen="true"] #related,
 html[data-ytb-hide-endscreen="true"] ytd-watch-next-secondary-results-renderer {
   display: none !important;
 }
+
+#yt-tt-schedule-strip {
+  display: grid;
+  gap: 6px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--tt-divider);
+  background: var(--tt-surface-menu);
+  color: var(--tt-text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+#yt-tt-schedule-strip[hidden],
+#yt-tt-schedule-strip [hidden] {
+  display: none;
+}
+
+.yt-tt-budget-line,
+.yt-tt-window-labels {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+}
+
+#yt-tt-schedule-strip strong {
+  color: var(--tt-text-primary);
+  font-weight: 600;
+}
+
+#yt-tt-schedule-reset { margin-inline-start: auto; }
+.yt-tt-window-labels { justify-content: space-between; }
+
+#yt-tt-window-progress {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  gap: 2px;
+  margin-top: 4px;
+}
+
+#yt-tt-window-progress span {
+  height: 5px;
+  border-radius: 1px;
+  background: var(--tt-btn-tonal-hover);
+}
+
+#yt-tt-window-progress .elapsed { background: var(--tt-text-primary); }
+
+@media (forced-colors: active) {
+  #yt-tt-window-progress span { border: 1px solid GrayText; }
+  #yt-tt-window-progress .elapsed { background: CanvasText; forced-color-adjust: none; }
+}
+
+.yt-tt-schedule-link {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-align: start;
+  width: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--tt-divider);
+  color: var(--tt-text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.yt-tt-schedule-link:hover { background: var(--tt-surface-subtle); }
+.yt-tt-schedule-link:focus-visible { outline: 2px solid var(--tt-accent); outline-offset: -3px; }
+.yt-tt-schedule-link > span {
+  width: 20px;
+  height: 20px;
+  background: currentColor;
+  color: var(--tt-text-secondary);
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  forced-color-adjust: none;
+}
+
+@media (forced-colors: active) {
+  .yt-tt-schedule-link > span { color: ButtonText; }
+}

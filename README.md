@@ -8,7 +8,6 @@
 [![Manifest V3](https://img.shields.io/badge/Manifest-V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![Cross-Browser](https://img.shields.io/badge/Browser-Chrome%20%7C%20Firefox%20%7C%20Edge%20%7C%20Brave-orange.svg)]()
 [![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6.svg)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/Tests-Passing%20(20%2F20)-brightgreen.svg)]()
 [![Version](https://img.shields.io/badge/Version-v1.3.1-purple.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -98,13 +97,12 @@ Originally developed as **TimeFit**, **TimeTube** has evolved into a complete, i
 
 ### 8. Weekly YouTube Schedules
 
-1. Open TimeTube from the browser toolbar and select **Set up schedule**.
-2. Select **Add rule**. Pick individual days or use **Every day**, **Weekdays**, or **Weekends**. Each day can belong to one rule.
-3. Set the start time, end time, and daily limit. Times use your device's local time. An end time earlier than the start time means the window ends the next day.
-4. Choose **Time on YouTube** to count time while a YouTube tab is visible, or **Active playback** to stop counting when playback pauses. Simultaneous use in multiple tabs counts once.
-5. Select **Apply rule**, then turn on **Enable schedule** and select **Save schedule**. Use **Edit schedule** to return later. Turning the schedule off preserves saved rules.
+1. Open the schedule row at the bottom of the toolbar popup. Turn on **Enable schedule** to draft your first rule. Enforcement begins when you save it.
+2. Select individual days or use a day preset. Choose **Access window**, **Daily limit**, or both. An access window can run overnight.
+3. For a daily limit, choose the number of minutes, counting mode, and local reset time. **Time on YouTube** counts visible tab time. **Active playback** counts while video plays. Simultaneous usage counts once. A Monday budget resetting at 4 AM runs until Tuesday at 4 AM.
+4. Save the schedule. Disabling it immediately suspends enforcement and discards pending edits. Re-enabling it resumes your saved rules.
 
-The popup shows the remaining allowance and closing time during an open window. When a window is closed or its allowance runs out, TimeTube stops playback and shows its **Time up** screen. The popup shows when access resumes. Days without a rule allow normal YouTube use.
+The strip above the manual timer shows the daily allowance and reset time, the progress of the access window, or both. When access is restricted, the popup shows when it resumes.
 
 You can still use **Timer**, **End time**, and **Max length** when the schedule allows access. If a Timer or End time session would exceed the remaining allowance or run past closing, the toolbar popup offers **Shorten session** or **Add extra time**. Extra time applies only to that occurrence. Stopping a manual session or letting it auto-reset leaves the schedule in effect.
 
@@ -313,7 +311,7 @@ On every `push` and `pull_request` to the `main` branch, the workflow:
 2. **Sets up Node.js 22** with automated `npm` dependency caching.
 3. **Installs exact dependencies** via `npm ci`.
 4. **Runs TypeScript typechecking** (`tsc --noEmit`).
-5. **Runs all 12 automated unit tests** (`npm test`).
+5. **Runs the automated unit tests** (`npm test`).
 6. **Compiles production bundles** (`npm run build`).
 7. **Packages and uploads the extension artifact** (`timetube-extension-build`), generating a ready-to-download `.zip` on every build run.
 
@@ -394,7 +392,7 @@ Under the hood, this compiles test files via `scripts/build-tests.mjs` with `esb
 
 #### Requirement to Include Tests for New Features & Bugfixes
 - **Mandatory Test Coverage:** Any Pull Request that introduces a **new feature**, modifies **duration parsing**, changes **budgeting calculations**, alters **recommendation pruning**, or resolves a **bug** **MUST include new test cases** in `tests/policy.test.ts`.
-- **Zero Failures Allowed:** All 12 existing test scenarios plus your newly added test cases must pass with 100% success rate. PRs with missing tests or broken tests will not be accepted.
+- **Zero Failures Allowed:** All existing test scenarios plus your newly added test cases must pass with 100% success rate. PRs with missing tests or broken tests will not be accepted.
 - **Example Test Structure:**
   ```typescript
   import test from 'node:test';

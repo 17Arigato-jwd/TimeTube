@@ -1,6 +1,8 @@
-import type { ScheduledStartResponse } from '../core/schedule';
+import { EMPTY_SCHEDULE, type ScheduleState, type ScheduledStartResponse } from '../core/schedule';
+import { bindScheduleStrip } from '../shared/schedule-strip';
+import { formatMs } from '../shared/clock';
 import { formatApproxRemaining, getDefaultEndTime } from '../core/duration';
-import { computeRemainingMs } from '../core/policy';
+import { buildSessionSnapshot, computeRemainingMs } from '../core/policy';
 import { BudgetSpec, PersistedSessionState } from '../core/types';
 import { webext } from '../shared/webext';
 
@@ -10,12 +12,8 @@ let selectedMode: BudgetSpec['mode'] = 'countdown';
 let lastState: PersistedSessionState | null = null;
 let outsideClickBound = false;
 
-function formatClock(ms: number): string {
-  const totalSec = Math.max(0, Math.ceil(ms / 1000));
-  const mins = Math.floor(totalSec / 60);
-  const secs = totalSec % 60;
-  return `${mins}:${String(secs).padStart(2, '0')}`;
-}
+let lastSchedule = EMPTY_SCHEDULE;
+let renderScheduleStrip: ReturnType<typeof bindScheduleStrip> | undefined;
 
 function isDarkTheme(): boolean {
   return document.documentElement.hasAttribute('dark');
@@ -64,6 +62,24 @@ function buildPopover(onStateChange: (next: PersistedSessionState) => void): HTM
       <span id="yt-tt-status-pill" class="yt-tt-status yt-tt-status-idle">Off</span>
     </div>
 
+    <section id="yt-tt-schedule-strip" data-schedule-strip aria-label="Schedule status" hidden>
+      <div id="yt-tt-schedule-budget" data-schedule-budget class="yt-tt-budget-line" hidden>
+        <strong id="yt-tt-schedule-status" data-schedule-status></strong>
+        <span id="yt-tt-schedule-paused" data-schedule-paused hidden>Paused</span>
+        <span id="yt-tt-schedule-reset" data-schedule-reset></span>
+      </div>
+      <div id="yt-tt-schedule-window" data-schedule-window hidden>
+        <div class="yt-tt-window-labels" aria-hidden="true">
+          <span id="yt-tt-window-start" data-window-start></span>
+          <strong id="yt-tt-window-now" data-window-now></strong>
+          <span id="yt-tt-window-end" data-window-end></span>
+        </div>
+        <div id="yt-tt-window-progress" data-window-progress role="progressbar" aria-label="Scheduled access window"
+             aria-valuemin="0" aria-valuemax="100"></div>
+      </div>
+      <div id="yt-tt-schedule-detail" data-schedule-detail hidden></div>
+    </section>
+
     <div id="yt-tt-active-banner" class="yt-tt-active-strip yt-tt-hidden">
       <div class="yt-tt-active-meta">
         <span class="yt-tt-caption">Time remaining</span>
@@ -75,7 +91,7 @@ function buildPopover(onStateChange: (next: PersistedSessionState) => void): HTM
       </div>
     </div>
 
-    <div class="yt-tt-section">
+    <div id="yt-tt-session-setup" class="yt-tt-section">
       <div class="yt-tt-tabs" role="tablist">
         <button type="button" class="yt-tt-tab active" data-mode="countdown">Timer</button>
         <button type="button" class="yt-tt-tab" data-mode="until">End time</button>
@@ -157,7 +173,29 @@ function buildPopover(onStateChange: (next: PersistedSessionState) => void): HTM
         </span>
       </label>
     </div>
+    <p id="yt-tt-schedule-error" role="alert" hidden></p>
+    <button id="yt-tt-schedule-open" type="button" class="yt-tt-schedule-link">
+      <strong>Schedule</strong>
+      <span aria-hidden="true"></span>
+    </button>
   `;
+
+  renderScheduleStrip = bindScheduleStrip(pop.querySelector<HTMLElement>('#yt-tt-schedule-strip')!);
+  const scheduleButton = pop.querySelector<HTMLButtonElement>('#yt-tt-schedule-open')!;
+  scheduleButton.querySelector('span')!.style.maskImage =
+    `url("${webext.runtime.getURL('assets/material/chevron_right.svg')}")`;
+  scheduleButton.addEventListener('click', async () => {
+    const response = await webext.runtime.sendMessage<{ error?: string }>({ type: 'OPEN_SCHEDULE_SETTINGS' })
+      .catch(() => ({ error: 'Could not open schedule settings.' }));
+    if (response?.error) {
+      const error = pop.querySelector<HTMLElement>('#yt-tt-schedule-error')!;
+      error.textContent = 'Could not open schedule settings.';
+      error.hidden = false;
+    } else {
+      closeTopbarPopover();
+      document.getElementById('yt-timetube-topbar-btn')?.focus();
+    }
+  });
 
   const logoImg = pop.querySelector<HTMLImageElement>('.yt-tt-pop-logo');
   if (logoImg) {
@@ -289,10 +327,12 @@ function buildPopover(onStateChange: (next: PersistedSessionState) => void): HTM
 
 export function syncTopbarControl(
   state: PersistedSessionState,
+  schedule: ScheduleState,
   onStateChange: (next: PersistedSessionState) => void,
   onWake: () => void,
 ): void {
   lastState = state;
+  lastSchedule = schedule;
   const container = getHeaderButtonsContainer();
   if (!container) return;
 
@@ -408,26 +448,31 @@ function updatePopoverUI(pop: HTMLElement, state: PersistedSessionState): void {
   const activeBanner = pop.querySelector<HTMLElement>('#yt-tt-active-banner');
   const remainingEl = pop.querySelector<HTMLElement>('#yt-tt-remaining');
   const extendBtn = pop.querySelector<HTMLElement>('#yt-tt-extend');
-  const remainingMs = computeRemainingMs(state, Date.now());
+  const now = Date.now();
+  const { status, remainingMs } = buildSessionSnapshot(state, now);
+  const restricted = renderScheduleStrip?.(lastSchedule, now) ?? false;
+  pop.querySelector('#yt-tt-session-setup')?.classList.toggle(
+    'yt-tt-hidden', restricted || status === 'active' || status === 'paused',
+  );
 
   if (pill && activeBanner && remainingEl && extendBtn) {
-    if (state.status === 'active' || state.status === 'paused') {
+    if (status === 'active' || status === 'paused') {
       pill.textContent =
-        state.status === 'paused'
+        status === 'paused'
           ? 'Paused'
           : state.spec?.mode === 'maxLength'
             ? 'Max length'
             : 'Active';
-      pill.className = state.status === 'paused' ? 'yt-tt-status yt-tt-status-paused' : 'yt-tt-status yt-tt-status-active';
+      pill.className = status === 'paused' ? 'yt-tt-status yt-tt-status-paused' : 'yt-tt-status yt-tt-status-active';
       activeBanner.classList.remove('yt-tt-hidden');
       if (state.spec?.mode === 'maxLength') {
         remainingEl.textContent = `≤ ${state.spec.maxMinutes}m`;
         extendBtn.classList.add('yt-tt-hidden');
       } else {
-        remainingEl.textContent = remainingMs !== null ? formatClock(remainingMs) : '--:--';
+        remainingEl.textContent = remainingMs !== null ? formatMs(remainingMs) : '--:--';
         extendBtn.classList.remove('yt-tt-hidden');
       }
-    } else if (state.status === 'expired') {
+    } else if (status === 'expired') {
       pill.textContent = 'Time up';
       pill.className = 'yt-tt-status yt-tt-status-expired';
       activeBanner.classList.remove('yt-tt-hidden');
@@ -455,7 +500,8 @@ function updatePopoverUI(pop: HTMLElement, state: PersistedSessionState): void {
   if (showDur) showDur.checked = state.policy.showShortDurationBadges;
 }
 
-export function tickTopbarUI(state: PersistedSessionState): void {
+export function tickTopbarUI(state: PersistedSessionState, schedule: ScheduleState): void {
+  lastSchedule = schedule;
   updateTopbarBadge(state);
   const pop = document.getElementById('yt-timetube-popover');
   if (pop && popoverOpen) {

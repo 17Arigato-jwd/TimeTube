@@ -21,7 +21,7 @@
       </span>
     </label>
 
-    <section aria-labelledby="rules-title">
+    <section id="weekly-rules" aria-labelledby="rules-title">
       <div class="tt-schedule-toolbar">
         <h2 id="rules-title">Weekly rules</h2>
         <button id="add-rule" type="button" class="tt-pill-btn tt-pill-tonal" disabled>Add rule</button>
@@ -42,23 +42,36 @@
         <div id="day-options" class="tt-day-options"></div>
         <p id="days-error" class="tt-field-error" role="alert" hidden></p>
       </fieldset>
-      <div class="tt-rule-fields">
-        <label>Start <input type="time" id="rule-start" class="tt-input" required aria-describedby="time-error" /></label>
-        <label>End <input type="time" id="rule-end" class="tt-input" required aria-describedby="overnight time-error" /></label>
-        <label>Daily limit (minutes) <input type="number" id="rule-limit" class="tt-input" min="1" max="1440" step="1" required aria-describedby="limit-error" /></label>
-      </div>
-      <p id="overnight" hidden>Ends the next day.</p>
-      <p id="time-error" class="tt-field-error" role="alert" hidden></p>
-      <p id="limit-error" class="tt-field-error" role="alert" hidden></p>
-      <fieldset>
-        <legend>Count usage</legend>
-        <div class="tt-counting-options">
-          <label><input type="radio" name="mode" value="site" aria-describedby="site-hint" /> Time on YouTube</label>
-          <label><input type="radio" name="mode" value="playback" aria-describedby="playback-hint" /> Active playback</label>
-        </div>
-        <p id="site-hint">Time on YouTube counts while a YouTube tab is visible.</p>
-        <p id="playback-hint">Active playback stops counting when playback pauses.</p>
-      </fieldset>
+      <p id="sections-error" class="tt-field-error" role="alert" hidden></p>
+      <section class="tt-rule-section" aria-labelledby="window-label">
+        <label class="tt-section-choice"><input id="window-enabled" type="checkbox" aria-describedby="sections-error" /><strong id="window-label">Access window</strong></label>
+        <fieldset id="window-fields" aria-labelledby="window-label">
+          <div class="tt-rule-fields">
+            <label>Start <input type="time" id="rule-start" class="tt-input" required aria-describedby="time-error" /></label>
+            <label>End <input type="time" id="rule-end" class="tt-input" required aria-describedby="overnight time-error" /></label>
+          </div>
+          <p id="overnight" hidden>Ends the next day.</p>
+          <p id="time-error" class="tt-field-error" role="alert" hidden></p>
+        </fieldset>
+      </section>
+      <section class="tt-rule-section" aria-labelledby="limit-label">
+        <label class="tt-section-choice"><input id="limit-enabled" type="checkbox" aria-describedby="sections-error" /><strong id="limit-label">Daily limit</strong></label>
+        <fieldset id="limit-fields" aria-labelledby="limit-label">
+          <div class="tt-rule-fields">
+            <label>Daily limit (minutes) <input type="number" id="rule-limit" class="tt-input" min="1" max="1440" step="1" required aria-describedby="limit-error" /></label>
+            <label>Reset at <input type="time" id="rule-reset" class="tt-input" required aria-describedby="reset-error" /></label>
+          </div>
+          <p id="limit-error" class="tt-field-error" role="alert" hidden></p>
+          <p id="reset-error" class="tt-field-error" role="alert" hidden></p>
+          <fieldset class="tt-count-mode">
+            <legend>Count usage</legend>
+            <div class="tt-counting-options">
+              <label><input type="radio" name="mode" value="site" aria-describedby="site-hint" /> Time on YouTube <small id="site-hint">While a YouTube tab is visible</small></label>
+              <label><input type="radio" name="mode" value="playback" aria-describedby="playback-hint" /> Active playback <small id="playback-hint">While a video is playing</small></label>
+            </div>
+          </fieldset>
+        </fieldset>
+      </section>
       <div class="tt-schedule-actions tt-editor-actions">
         <button id="remove-rule" type="button" class="tt-pill-btn tt-pill-danger">Remove rule</button>
         <button id="cancel-rule" type="button" class="tt-pill-btn tt-pill-tonal">Cancel edit</button>
@@ -73,6 +86,14 @@
       <button id="save-schedule" type="button" class="tt-pill-btn tt-pill-primary" disabled>Save schedule</button>
     </footer>
   </main>
+  <dialog id="remove-dialog" class="tt-conflict tt-remove-dialog" aria-labelledby="remove-heading" aria-describedby="remove-description">
+    <h2 id="remove-heading">Remove rule?</h2>
+    <p id="remove-description"></p>
+    <form method="dialog" class="tt-schedule-actions">
+      <button type="submit" id="cancel-remove" value="cancel" class="tt-pill-btn tt-pill-tonal" autofocus>Cancel</button>
+      <button type="submit" id="confirm-remove" value="remove" class="tt-pill-btn tt-pill-danger">Remove rule</button>
+    </form>
+  </dialog>
   <script type="module" src="../dist/schedule.js"></script>
 </body>
 </html>

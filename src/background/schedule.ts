@@ -1,5 +1,5 @@
 import {
-  EMPTY_SCHEDULE, getScheduleStatus, MAX_SAMPLE_GAP_MS, recordUsage, resolveScheduledStart, SCHEDULE_KEY,
+  EMPTY_SCHEDULE, migrateSchedule, updateCounting, MAX_SAMPLE_GAP_MS, recordUsage, resolveScheduledStart, SCHEDULE_KEY,
   validateSchedule, type ScheduleState,
 } from '../core/schedule';
 import type { BudgetSpec, PersistedSessionState, RuntimeMessage } from '../core/types';
@@ -20,17 +20,38 @@ async function processMessage(
   startSession: StartSession,
 ): Promise<unknown> {
   const stored = await webext.storage.local.get<{ [SCHEDULE_KEY]?: ScheduleState }>(SCHEDULE_KEY);
-  const schedule = stored[SCHEDULE_KEY] ?? EMPTY_SCHEDULE;
   const now = Date.now();
+  const raw = stored[SCHEDULE_KEY] ?? EMPTY_SCHEDULE;
+  const schedule = migrateSchedule(raw, now);
+  if (raw !== schedule) await webext.storage.local.set({ [SCHEDULE_KEY]: schedule });
 
   switch (message.type) {
     case 'SAVE_SCHEDULE': {
       validateSchedule(message.enabled, message.rules);
       const rulesChanged = JSON.stringify(message.rules) !== JSON.stringify(schedule.rules);
-      const usage = rulesChanged
-        ? Object.fromEntries(Object.entries(schedule.usage).map(([key, { usedMs, recent }]) => [key, { usedMs, recent }]))
-        : schedule.usage;
-      const next = { enabled: message.enabled, rules: message.rules, usage };
+      const enabledChanged = message.enabled !== schedule.enabled;
+      const usage = { ...schedule.usage };
+      if (rulesChanged || enabledChanged) {
+        for (const [key, entry] of Object.entries(usage)) {
+          const [year, month, day] = key.split('-').map(Number);
+          if (year === undefined || month === undefined || day === undefined) continue;
+          const weekday = new Date(year, month - 1, day).getDay();
+          const oldRule = schedule.rules.find((rule) => rule.days.includes(weekday));
+          const newRule = message.rules.find((rule) => rule.days.includes(weekday));
+          const retained = { ...entry, countingUntil: 0 };
+          if (!oldRule || !newRule || oldRule.id !== newRule.id || oldRule.start !== newRule.start ||
+              oldRule.end !== newRule.end || oldRule.windowEnabled !== newRule.windowEnabled) {
+            delete retained.closesAtOverride;
+          }
+          if (!oldRule || !newRule || oldRule.id !== newRule.id || oldRule.limitMinutes !== newRule.limitMinutes ||
+              oldRule.resetTime !== newRule.resetTime || oldRule.limitEnabled !== newRule.limitEnabled) {
+            delete retained.limitOverrideMs;
+          }
+          usage[key] = retained;
+        }
+      }
+      const next: ScheduleState = { ...schedule, enabled: message.enabled, rules: message.rules, usage };
+      if (rulesChanged) delete next.legacyCarry;
       await webext.storage.local.set({ [SCHEDULE_KEY]: next });
       if (rulesChanged || message.enabled !== schedule.enabled) samples.clear();
       return next;
@@ -44,11 +65,8 @@ async function processMessage(
         if (now - sample.at > MAX_SAMPLE_GAP_MS) samples.delete(key);
       }
       samples.set(id, { at: now, visible: message.visible, playing: message.playing });
-      if (!previous || now - previous.at > MAX_SAMPLE_GAP_MS) return;
-      const before = getScheduleStatus(schedule, previous.at);
-      const current = before.kind === 'open' ? before : getScheduleStatus(schedule, now);
-      if (current.kind !== 'open' || !(current.rule.mode === 'site' ? previous.visible : previous.playing)) return;
-      const next = recordUsage(schedule, previous.at, now);
+      const charged = previous ? recordUsage(schedule, previous.at, now, previous) : schedule;
+      const next = updateCounting(charged, now, [...samples.values()].filter((sample) => now - sample.at < 2500));
       if (next !== schedule) await webext.storage.local.set({ [SCHEDULE_KEY]: next });
       return;
     }

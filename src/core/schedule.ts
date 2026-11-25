@@ -13,21 +13,31 @@ export interface ScheduleRule {
   end: string;
   limitMinutes: number;
   mode: 'site' | 'playback';
+  windowEnabled?: boolean;
+  limitEnabled?: boolean;
+  resetTime?: string;
 }
 
 interface OccurrenceUsage {
   usedMs: number;
   recent: Array<[number, number]>;
+  // v1 stored both overrides on the window's start date.
   extra?: { closesAt: number; limitMs: number };
+  closesAtOverride?: number;
+  limitOverrideMs?: number;
+  countingUntil?: number;
 }
 
 export interface ScheduleState {
+  version?: 2;
+  // Finish charging an in-flight legacy overnight allowance when its new day is unassigned.
+  legacyCarry?: { key: string; ruleId: string; start: number; end: number };
   enabled: boolean;
   rules: ScheduleRule[];
   usage: Record<string, OccurrenceUsage>;
 }
 
-export const EMPTY_SCHEDULE: ScheduleState = { enabled: false, rules: [], usage: {} };
+export const EMPTY_SCHEDULE: ScheduleState = { version: 2, enabled: false, rules: [], usage: {} };
 
 interface Occurrence {
   key: string;
@@ -65,9 +75,12 @@ export function validateSchedule(enabled: boolean, rules: ScheduleRule[]): void 
       owners.set(day, rule);
     }
     const time = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
-    if (!time.test(rule.start) || !time.test(rule.end) || rule.start === rule.end) {
+    if (rule.windowEnabled === false && rule.limitEnabled === false) throw new Error('Select an access window or daily limit.');
+    if (rule.windowEnabled !== false && (!time.test(rule.start) || !time.test(rule.end) || rule.start === rule.end)) {
       throw new Error('Choose different start and end times.');
     }
+    if (rule.limitEnabled === false) continue;
+    if (!time.test(rule.resetTime ?? '00:00')) throw new Error('Choose a valid daily reset time.');
     if (!Number.isInteger(rule.limitMinutes) || rule.limitMinutes < 1 || rule.limitMinutes > 1440) {
       throw new Error('Enter a daily limit between 1 and 1,440 minutes.');
     }
@@ -85,55 +98,194 @@ function atTime(day: Date, time: string, nextDay = false): number {
   return new Date(day.getFullYear(), day.getMonth(), day.getDate() + Number(nextDay), hour, minute).getTime();
 }
 
-function occurrences(state: ScheduleState, now: number, lastOffset: number): Occurrence[] {
-  const date = new Date(now);
-  const windows: Occurrence[] = [];
-  for (let offset = -2; offset <= lastOffset; offset++) {
-    const day = new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset);
+interface Period {
+  key: string;
+  rule: ScheduleRule;
+  start: number;
+  end: number;
+}
+
+function localDay(now: number, offset = 0): Date {
+  const day = new Date(now);
+  day.setHours(0, 0, 0, 0);
+  day.setDate(day.getDate() + offset);
+  return day;
+}
+
+interface Timeline {
+  windows: Period[];
+  budgets: Period[];
+  boundaries: number[];
+}
+
+function timeline(state: ScheduleState, now: number, daysAhead: number): Timeline {
+  const windows: Period[] = [];
+  const budgets: Period[] = [];
+  const boundaries = new Set<number>();
+  for (let offset = -2; offset <= daysAhead; offset++) {
+    const day = localDay(now, offset);
+    boundaries.add(day.getTime());
     const rule = state.rules.find((item) => item.days.includes(day.getDay()));
     if (!rule) continue;
     const key = dateKey(day);
-    const exception = state.usage[key]?.extra;
-    const opensAt = atTime(day, rule.start);
-    const closesAt = Math.max(atTime(day, rule.end, rule.end < rule.start), exception?.closesAt ?? 0);
-    windows.push({ key, rule, opensAt, closesAt, limitMs: Math.max(rule.limitMinutes * MINUTE_MS, exception?.limitMs ?? 0) });
+    if (rule.windowEnabled !== false) {
+      const start = atTime(day, rule.start);
+      const end = Math.max(atTime(day, rule.end, rule.end < rule.start), state.usage[key]?.closesAtOverride ?? 0);
+      windows.push({ key, rule, start, end });
+      boundaries.add(start);
+      boundaries.add(end);
+    }
+    if (rule.limitEnabled !== false) {
+      const reset = rule.resetTime ?? '00:00';
+      const start = atTime(day, reset);
+      const end = atTime(day, reset, true);
+      budgets.push({ key, rule, start, end });
+      boundaries.add(start);
+      boundaries.add(end);
+    }
   }
-  return windows;
+  const carry = state.legacyCarry;
+  if (carry && carry.end > now - MAX_SAMPLE_GAP_MS) {
+    const rule = state.rules.find((item) => item.id === carry.ruleId && item.limitEnabled !== false);
+    if (rule) {
+      budgets.push({ key: carry.key, rule, start: carry.start, end: carry.end });
+      boundaries.add(carry.end);
+    }
+  }
+  return { windows, budgets, boundaries: [...boundaries].sort((a, b) => a - b) };
 }
 
-export function getScheduleStatus(state: ScheduleState, now: number): ScheduleStatus {
-  if (!state.enabled) return { kind: 'off' };
+function includesTime(period: Period, now: number): boolean {
+  return period.start <= now && now < period.end;
+}
+
+export function migrateSchedule(state: ScheduleState, now: number): ScheduleState {
+  if (state.version === 2) return state;
+  const usage: ScheduleState['usage'] = {};
+  for (const [key, entry] of Object.entries(state.usage)) {
+    const { extra, ...balance } = entry;
+    usage[key] = extra
+      ? { ...balance, closesAtOverride: extra.closesAt, limitOverrideMs: extra.limitMs }
+      : balance;
+  }
+  const migrated: ScheduleState = { ...state, version: 2, usage };
+  const { windows, budgets } = timeline(migrated, now, 0);
+  const activeBudget = budgets.find((period) => includesTime(period, now));
+  const oldWindow = windows.find((period) => includesTime(period, now));
+  if (oldWindow && activeBudget && oldWindow.key !== activeBudget.key && usage[oldWindow.key]) {
+    // A live overnight window used yesterday's balance before the upgrade.
+    const previous = usage[oldWindow.key]!;
+    const current = usage[activeBudget.key] ?? { usedMs: 0, recent: [] };
+    usage[activeBudget.key] = { ...current, usedMs: current.usedMs + previous.usedMs };
+  }
+  if (oldWindow && !activeBudget && usage[oldWindow.key]?.usedMs) {
+    migrated.legacyCarry = { key: oldWindow.key, ruleId: oldWindow.rule.id, start: now, end: oldWindow.end };
+  }
+  return migrated;
+}
+
+function limitMs(state: ScheduleState, period: Period): number {
+  return Math.max(period.rule.limitMinutes * MINUTE_MS, state.usage[period.key]?.limitOverrideMs ?? 0);
+}
+
+function remaining(state: ScheduleState, period: Period): number {
+  return Math.max(0, limitMs(state, period) - (state.usage[period.key]?.usedMs ?? 0));
+}
+
+function currentPeriods(state: ScheduleState, line: Timeline, now: number) {
+  const activeWindows = line.windows.filter((item) => includesTime(item, now));
   const today = dateKey(new Date(now));
-  const windows = occurrences(state, now, 7);
-  const open = windows.filter((window) => window.opensAt <= now && now < window.closesAt);
-  for (const window of open) {
-    const remainingMs = window.limitMs - (state.usage[window.key]?.usedMs ?? 0);
-    if (remainingMs > 0) return { kind: 'open', ...window, remainingMs };
-  }
-  if (!open.length && !windows.some((window) => window.key === today)) return { kind: 'unassigned' };
-  const candidates = windows.flatMap(({ opensAt, closesAt }) => [opensAt, closesAt]);
-  const date = new Date(now);
-  for (let offset = 1; offset <= 7; offset++) {
-    candidates.push(new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset).getTime());
-  }
-  const nextOpen = candidates.filter((time) => time > now).sort((a, b) => a - b).find((time) => {
-    const current = windows.filter(({ opensAt, closesAt }) => opensAt <= time && time < closesAt);
-    if (current.length) return current.some(({ key, limitMs }) => (state.usage[key]?.usedMs ?? 0) < limitMs);
-    const day = dateKey(new Date(time));
-    return !windows.some((window) => window.key === day);
-  }) ?? null;
-  return { kind: open.length ? 'spent' : 'closed', nextOpen };
+  const window = activeWindows.at(-1) ?? line.windows.find((item) => item.key === today);
+  const budgets = line.budgets.filter((item) => includesTime(item, now));
+  // Consecutive rules with different reset times may briefly overlap.
+  const budget = budgets.slice().sort((a, b) => remaining(state, a) - remaining(state, b))[0];
+  const closed = !!window && !activeWindows.length;
+  const spent = !!budget && remaining(state, budget) <= 0;
+  return { window, budget, budgets, closed, spent };
 }
 
-export function recordUsage(state: ScheduleState, start: number, end: number): ScheduleState {
-  if (end <= start || end - start > MAX_SAMPLE_GAP_MS) return state;
-  const status = getScheduleStatus(state, start);
-  const window = status.kind === 'open' ? status : getScheduleStatus(state, end - 1);
-  if (window.kind !== 'open') return state;
-  start = Math.max(start, window.opensAt);
-  end = Math.min(end, window.closesAt);
-  if (end <= start) return state;
-  const previous = state.usage[window.key] ?? { usedMs: 0, recent: [] };
+export interface ScheduleStrip {
+  window?: { opensAt: number; closesAt: number };
+  budget?: { remainingMs: number; resetsAt: number; counting: boolean };
+}
+
+export function getScheduleStrip(raw: ScheduleState, now: number): ScheduleStrip {
+  if (!raw.enabled) return {};
+  const state = migrateSchedule(raw, now);
+  const { window, budget, closed, spent } = currentPeriods(state, timeline(state, now, 0), now);
+  const strip: ScheduleStrip = {};
+  if (window) strip.window = { opensAt: window.start, closesAt: window.end };
+  if (budget) strip.budget = {
+    remainingMs: remaining(state, budget),
+    resetsAt: budget.end,
+    counting: !closed && !spent && (state.usage[budget.key]?.countingUntil ?? 0) > now,
+  };
+  return strip;
+}
+
+export function getScheduleStatus(raw: ScheduleState, now: number): ScheduleStatus {
+  if (!raw.enabled) return { kind: 'off' };
+  const state = migrateSchedule(raw, now);
+  const line = timeline(state, now, 1);
+  const { window, budget, budgets, closed, spent } = currentPeriods(state, line, now);
+  const active = window ?? budget;
+  if (!active) return { kind: 'unassigned' };
+  if (closed || spent) {
+    const future = timeline(state, now, 8);
+    const nextOpen = future.boundaries.find((time) => {
+      if (time <= now) return false;
+      const status = currentPeriods(state, future, time);
+      return !status.closed && !status.spent;
+    }) ?? null;
+    return { kind: spent ? 'spent' : 'closed', nextOpen };
+  }
+  const key = [window, ...budgets].filter((p): p is Period => !!p)
+    .map((p) => p.key + '/' + p.rule.id).join('|');
+  return {
+    kind: 'open', key, rule: active.rule,
+    opensAt: window?.start ?? active.start, closesAt: window?.end ?? Infinity,
+    remainingMs: budget ? remaining(state, budget) : Infinity,
+    limitMs: budget ? limitMs(state, budget) : Infinity,
+  };
+}
+
+export interface Activity { visible: boolean; playing: boolean }
+
+function eligible(rule: ScheduleRule, activity: Activity): boolean {
+  return rule.mode === 'site' ? activity.visible : activity.playing;
+}
+
+export function updateCounting(state: ScheduleState, now: number, tabs: Activity[]): ScheduleState {
+  const { budgets, closed, spent } = currentPeriods(state, timeline(state, now, 0), now);
+  let next = state;
+  for (const budget of budgets) {
+    const active = !closed && !spent && tabs.some((tab) => eligible(budget.rule, tab));
+    const entry = next.usage[budget.key] ?? { usedMs: 0, recent: [] };
+    const countingUntil = active ? now + 2500 : 0;
+    if ((entry.countingUntil ?? 0) === countingUntil) continue;
+    next = { ...next, usage: { ...next.usage, [budget.key]: { ...entry, countingUntil } } };
+  }
+  return next;
+}
+
+export function recordUsage(raw: ScheduleState, start: number, end: number, activity?: Activity): ScheduleState {
+  if (!raw.enabled || end <= start || end - start > MAX_SAMPLE_GAP_MS) return raw;
+  let state = migrateSchedule(raw, start);
+  const line = timeline(state, start, 1);
+  let from = start;
+  for (const to of [...line.boundaries.filter((t) => start < t && t < end), end]) {
+    const { closed, spent, budgets } = currentPeriods(state, line, from);
+    if (!closed && !spent) {
+      const eligibleBudgets = budgets.filter((budget) => !activity || eligible(budget.rule, activity));
+      for (const budget of eligibleBudgets) state = chargeInterval(state, budget.key, from, to);
+    }
+    from = to;
+  }
+  return state;
+}
+
+function chargeInterval(state: ScheduleState, key: string, start: number, end: number): ScheduleState {
+  const previous = state.usage[key] ?? { usedMs: 0, recent: [] };
   const recent: OccurrenceUsage['recent'] = [];
   let added = end - start;
   let mergedStart = start;
@@ -155,7 +307,7 @@ export function recordUsage(state: ScheduleState, start: number, end: number): S
   const oldest = new Date(end);
   oldest.setDate(oldest.getDate() - 7);
   const usage = Object.fromEntries(Object.entries(state.usage).filter(([key]) => key >= dateKey(oldest)));
-  usage[window.key] = { ...previous, usedMs: previous.usedMs + added, recent };
+  usage[key] = { ...previous, usedMs: previous.usedMs + added, recent };
   return { ...state, usage };
 }
 
@@ -175,6 +327,7 @@ export type ScheduledStartResponse =
   | { kind: 'start'; state: PersistedSessionState };
 
 export function resolveScheduledStart(state: ScheduleState, spec: BudgetSpec, now: number, choice?: ScheduleChoice): ScheduledStart {
+  state = migrateSchedule(state, now);
   const status = getScheduleStatus(state, now);
   if (status.kind === 'closed' || status.kind === 'spent') return { kind: 'unavailable' };
   const { endsAtMs } = resolveBudgetBounds(spec, now);
@@ -182,10 +335,16 @@ export function resolveScheduledStart(state: ScheduleState, spec: BudgetSpec, no
     (choice.untilAt !== undefined && choice.untilAt !== endsAtMs))) return { kind: 'unavailable' };
   if (status.kind !== 'open' || endsAtMs === null) return { kind: 'start', endsAtMs, schedule: state };
 
-  const availableMs = Math.min(status.remainingMs, status.closesAt - now);
+  const { window, budgets } = currentPeriods(state, timeline(state, now, 0), now);
+  // A budget that resets before it can run out does not shorten this session.
+  const binding = budgets.filter((budget) => remaining(state, budget) < budget.end - now);
+  const usageAvailable = Math.min(...binding.map((budget) => remaining(state, budget)));
+  const availableMs = Math.min(usageAvailable, status.closesAt - now);
   const requestedMs = endsAtMs - now;
   if (requestedMs <= availableMs) return { kind: 'start', endsAtMs, schedule: state };
-  const extraUsageMs = Math.max(0, requestedMs - status.remainingMs);
+  const extraUsageMs = Math.max(0, ...binding.map((budget) =>
+    Math.min(requestedMs, budget.end - now) - remaining(state, budget),
+  ));
   const extraWindowMs = Math.max(0, endsAtMs - status.closesAt);
   if (!choice) {
     const untilAt = spec.mode === 'until' ? endsAtMs : undefined;
@@ -193,16 +352,16 @@ export function resolveScheduledStart(state: ScheduleState, spec: BudgetSpec, no
   }
   if (choice.action === 'shorten') return { kind: 'start', endsAtMs: now + availableMs, schedule: state };
 
-  const usage = state.usage[status.key] ?? { usedMs: 0, recent: [] };
-  return {
-    kind: 'start',
-    endsAtMs,
-    schedule: {
-      ...state,
-      usage: {
-        ...state.usage,
-        [status.key]: { ...usage, extra: { closesAt: Math.max(status.closesAt, endsAtMs), limitMs: status.limitMs + extraUsageMs } },
-      },
-    },
-  };
+  const usage = { ...state.usage };
+  if (window && extraWindowMs > 0) {
+    const entry = usage[window.key] ?? { usedMs: 0, recent: [] };
+    usage[window.key] = { ...entry, closesAtOverride: endsAtMs };
+  }
+  for (const budget of binding) {
+    const neededMs = Math.min(requestedMs, budget.end - now) - remaining(state, budget);
+    if (neededMs <= 0) continue;
+    const entry = usage[budget.key] ?? { usedMs: 0, recent: [] };
+    usage[budget.key] = { ...entry, limitOverrideMs: limitMs(state, budget) + neededMs };
+  }
+  return { kind: 'start', endsAtMs, schedule: { ...state, usage } };
 }

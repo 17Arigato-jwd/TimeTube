@@ -1,3 +1,4 @@
+import { formatMs } from '../shared/clock';
 import { initSchedulePopup, renderSchedule, startScheduledSession } from './schedule';
 import { getDefaultEndTime } from '../core/duration';
 import { buildSessionSnapshot } from '../core/policy';
@@ -27,13 +28,6 @@ const cutoffRow = document.getElementById('cutoff-row') as HTMLElement;
 const exceedActionSelect = document.getElementById('exceed-action') as HTMLSelectElement;
 const hideShortsNavCheckbox = document.getElementById('hide-shorts-nav') as HTMLInputElement;
 const showShortDurationsCheckbox = document.getElementById('show-short-durations') as HTMLInputElement;
-
-function formatMs(ms: number): string {
-  const totalSec = Math.max(0, Math.ceil(ms / 1000));
-  const mins = Math.floor(totalSec / 60);
-  const secs = totalSec % 60;
-  return `${mins}:${String(secs).padStart(2, '0')}`;
-}
 
 function setModeTab(mode: BudgetSpec['mode']): void {
   selectedMode = mode;

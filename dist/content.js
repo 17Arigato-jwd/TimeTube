@@ -141,51 +141,136 @@
   // src/core/schedule.ts
   var SCHEDULE_KEY = "timeTubeSchedule";
   var MINUTE_MS = 6e4;
-  var EMPTY_SCHEDULE = { enabled: false, rules: [], usage: {} };
+  var MAX_SAMPLE_GAP_MS = 1e4;
+  var EMPTY_SCHEDULE = { version: 2, enabled: false, rules: [], usage: {} };
   function dateKey(date) {
     return [date.getFullYear(), date.getMonth() + 1, date.getDate()].map((part) => String(part).padStart(2, "0")).join("-");
   }
-  function atTime(day, time, nextDay = false) {
-    const [hour = 0, minute = 0] = time.split(":").map(Number);
+  function atTime(day, time2, nextDay = false) {
+    const [hour = 0, minute = 0] = time2.split(":").map(Number);
     return new Date(day.getFullYear(), day.getMonth(), day.getDate() + Number(nextDay), hour, minute).getTime();
   }
-  function occurrences(state, now, lastOffset) {
-    const date = new Date(now);
+  function localDay(now, offset = 0) {
+    const day = new Date(now);
+    day.setHours(0, 0, 0, 0);
+    day.setDate(day.getDate() + offset);
+    return day;
+  }
+  function timeline(state, now, daysAhead) {
     const windows = [];
-    for (let offset = -2; offset <= lastOffset; offset++) {
-      const day = new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset);
+    const budgets = [];
+    const boundaries = /* @__PURE__ */ new Set();
+    for (let offset = -2; offset <= daysAhead; offset++) {
+      const day = localDay(now, offset);
+      boundaries.add(day.getTime());
       const rule = state.rules.find((item) => item.days.includes(day.getDay()));
       if (!rule) continue;
       const key = dateKey(day);
-      const exception = state.usage[key]?.extra;
-      const opensAt = atTime(day, rule.start);
-      const closesAt = Math.max(atTime(day, rule.end, rule.end < rule.start), exception?.closesAt ?? 0);
-      windows.push({ key, rule, opensAt, closesAt, limitMs: Math.max(rule.limitMinutes * MINUTE_MS, exception?.limitMs ?? 0) });
+      if (rule.windowEnabled !== false) {
+        const start = atTime(day, rule.start);
+        const end = Math.max(atTime(day, rule.end, rule.end < rule.start), state.usage[key]?.closesAtOverride ?? 0);
+        windows.push({ key, rule, start, end });
+        boundaries.add(start);
+        boundaries.add(end);
+      }
+      if (rule.limitEnabled !== false) {
+        const reset = rule.resetTime ?? "00:00";
+        const start = atTime(day, reset);
+        const end = atTime(day, reset, true);
+        budgets.push({ key, rule, start, end });
+        boundaries.add(start);
+        boundaries.add(end);
+      }
     }
-    return windows;
+    const carry = state.legacyCarry;
+    if (carry && carry.end > now - MAX_SAMPLE_GAP_MS) {
+      const rule = state.rules.find((item) => item.id === carry.ruleId && item.limitEnabled !== false);
+      if (rule) {
+        budgets.push({ key: carry.key, rule, start: carry.start, end: carry.end });
+        boundaries.add(carry.end);
+      }
+    }
+    return { windows, budgets, boundaries: [...boundaries].sort((a, b) => a - b) };
   }
-  function getScheduleStatus(state, now) {
-    if (!state.enabled) return { kind: "off" };
+  function includesTime(period, now) {
+    return period.start <= now && now < period.end;
+  }
+  function migrateSchedule(state, now) {
+    if (state.version === 2) return state;
+    const usage = {};
+    for (const [key, entry] of Object.entries(state.usage)) {
+      const { extra, ...balance } = entry;
+      usage[key] = extra ? { ...balance, closesAtOverride: extra.closesAt, limitOverrideMs: extra.limitMs } : balance;
+    }
+    const migrated = { ...state, version: 2, usage };
+    const { windows, budgets } = timeline(migrated, now, 0);
+    const activeBudget = budgets.find((period) => includesTime(period, now));
+    const oldWindow = windows.find((period) => includesTime(period, now));
+    if (oldWindow && activeBudget && oldWindow.key !== activeBudget.key && usage[oldWindow.key]) {
+      const previous = usage[oldWindow.key];
+      const current = usage[activeBudget.key] ?? { usedMs: 0, recent: [] };
+      usage[activeBudget.key] = { ...current, usedMs: current.usedMs + previous.usedMs };
+    }
+    if (oldWindow && !activeBudget && usage[oldWindow.key]?.usedMs) {
+      migrated.legacyCarry = { key: oldWindow.key, ruleId: oldWindow.rule.id, start: now, end: oldWindow.end };
+    }
+    return migrated;
+  }
+  function limitMs(state, period) {
+    return Math.max(period.rule.limitMinutes * MINUTE_MS, state.usage[period.key]?.limitOverrideMs ?? 0);
+  }
+  function remaining(state, period) {
+    return Math.max(0, limitMs(state, period) - (state.usage[period.key]?.usedMs ?? 0));
+  }
+  function currentPeriods(state, line, now) {
+    const activeWindows = line.windows.filter((item) => includesTime(item, now));
     const today = dateKey(new Date(now));
-    const windows = occurrences(state, now, 7);
-    const open = windows.filter((window2) => window2.opensAt <= now && now < window2.closesAt);
-    for (const window2 of open) {
-      const remainingMs = window2.limitMs - (state.usage[window2.key]?.usedMs ?? 0);
-      if (remainingMs > 0) return { kind: "open", ...window2, remainingMs };
+    const window2 = activeWindows.at(-1) ?? line.windows.find((item) => item.key === today);
+    const budgets = line.budgets.filter((item) => includesTime(item, now));
+    const budget = budgets.slice().sort((a, b) => remaining(state, a) - remaining(state, b))[0];
+    const closed = !!window2 && !activeWindows.length;
+    const spent = !!budget && remaining(state, budget) <= 0;
+    return { window: window2, budget, budgets, closed, spent };
+  }
+  function getScheduleStrip(raw, now) {
+    if (!raw.enabled) return {};
+    const state = migrateSchedule(raw, now);
+    const { window: window2, budget, closed, spent } = currentPeriods(state, timeline(state, now, 0), now);
+    const strip = {};
+    if (window2) strip.window = { opensAt: window2.start, closesAt: window2.end };
+    if (budget) strip.budget = {
+      remainingMs: remaining(state, budget),
+      resetsAt: budget.end,
+      counting: !closed && !spent && (state.usage[budget.key]?.countingUntil ?? 0) > now
+    };
+    return strip;
+  }
+  function getScheduleStatus(raw, now) {
+    if (!raw.enabled) return { kind: "off" };
+    const state = migrateSchedule(raw, now);
+    const line = timeline(state, now, 1);
+    const { window: window2, budget, budgets, closed, spent } = currentPeriods(state, line, now);
+    const active = window2 ?? budget;
+    if (!active) return { kind: "unassigned" };
+    if (closed || spent) {
+      const future = timeline(state, now, 8);
+      const nextOpen = future.boundaries.find((time2) => {
+        if (time2 <= now) return false;
+        const status = currentPeriods(state, future, time2);
+        return !status.closed && !status.spent;
+      }) ?? null;
+      return { kind: spent ? "spent" : "closed", nextOpen };
     }
-    if (!open.length && !windows.some((window2) => window2.key === today)) return { kind: "unassigned" };
-    const candidates = windows.flatMap(({ opensAt, closesAt }) => [opensAt, closesAt]);
-    const date = new Date(now);
-    for (let offset = 1; offset <= 7; offset++) {
-      candidates.push(new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset).getTime());
-    }
-    const nextOpen = candidates.filter((time) => time > now).sort((a, b) => a - b).find((time) => {
-      const current = windows.filter(({ opensAt, closesAt }) => opensAt <= time && time < closesAt);
-      if (current.length) return current.some(({ key, limitMs }) => (state.usage[key]?.usedMs ?? 0) < limitMs);
-      const day = dateKey(new Date(time));
-      return !windows.some((window2) => window2.key === day);
-    }) ?? null;
-    return { kind: open.length ? "spent" : "closed", nextOpen };
+    const key = [window2, ...budgets].filter((p) => !!p).map((p) => p.key + "/" + p.rule.id).join("|");
+    return {
+      kind: "open",
+      key,
+      rule: active.rule,
+      opensAt: window2?.start ?? active.start,
+      closesAt: window2?.end ?? Infinity,
+      remainingMs: budget ? remaining(state, budget) : Infinity,
+      limitMs: budget ? limitMs(state, budget) : Infinity
+    };
   }
 
   // src/core/duration.ts
@@ -285,18 +370,82 @@
   var rawApi = globalThis.browser ?? globalThis.chrome;
   var webext = rawApi;
 
+  // src/shared/clock.ts
+  function formatMs(ms) {
+    const totalSec = Math.max(0, Math.ceil(ms / 1e3));
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+    return `${mins}:${String(secs).padStart(2, "0")}`;
+  }
+
+  // src/shared/schedule-strip.ts
+  function time(ms) {
+    return new Date(ms).toLocaleTimeString(void 0, { hour: "numeric", minute: "2-digit" });
+  }
+  function setText(element, text) {
+    if (element.textContent !== text) element.textContent = text;
+  }
+  function bindScheduleStrip(strip) {
+    const statusLabel = strip.querySelector("[data-schedule-status]");
+    const detailLabel = strip.querySelector("[data-schedule-detail]");
+    const budgetLine = strip.querySelector("[data-schedule-budget]");
+    const pausedLabel = strip.querySelector("[data-schedule-paused]");
+    const resetLabel = strip.querySelector("[data-schedule-reset]");
+    const windowLine = strip.querySelector("[data-schedule-window]");
+    const windowStart = strip.querySelector("[data-window-start]");
+    const windowNow = strip.querySelector("[data-window-now]");
+    const windowEnd = strip.querySelector("[data-window-end]");
+    const windowProgress = strip.querySelector("[data-window-progress]");
+    const segments = Array.from({ length: 24 }, () => document.createElement("span"));
+    windowProgress.append(...segments);
+    return (schedule2, now, status = getScheduleStatus(schedule2, now)) => {
+      const restricted = status.kind === "closed" || status.kind === "spent";
+      const { window: accessWindow, budget } = getScheduleStrip(schedule2, now);
+      strip.hidden = !accessWindow && !budget && !restricted;
+      budgetLine.hidden = !budget;
+      if (budget) {
+        const spent = budget.remainingMs <= 0;
+        setText(statusLabel, spent ? "Time up" : `${formatMs(budget.remainingMs)} remaining`);
+        pausedLabel.hidden = spent || budget.counting;
+        setText(resetLabel, `Resets at ${time(budget.resetsAt)}`);
+      }
+      windowLine.hidden = !accessWindow;
+      if (accessWindow) {
+        const { opensAt, closesAt } = accessWindow;
+        const elapsed = Math.min(1, Math.max(0, (now - opensAt) / (closesAt - opensAt)));
+        const filled = Math.floor(segments.length * elapsed);
+        segments.forEach((segment, index) => segment.classList.toggle("elapsed", index < filled));
+        const start = time(opensAt);
+        const current = time(now);
+        const overnight = new Date(opensAt).toDateString() !== new Date(closesAt).toDateString();
+        const end = time(closesAt) + (overnight ? " next day" : "");
+        setText(windowStart, start);
+        setText(windowNow, `Now ${current}`);
+        setText(windowEnd, end);
+        windowProgress.setAttribute("aria-valuenow", String(Math.round(elapsed * 100)));
+        windowProgress.setAttribute("aria-valuetext", `Access from ${start} to ${end}. Current time ${current}.`);
+      }
+      detailLabel.hidden = !restricted;
+      if (status.kind === "closed" || status.kind === "spent") {
+        if (status.nextOpen !== null) {
+          const day = new Date(status.nextOpen).toLocaleDateString(void 0, { weekday: "long" });
+          setText(detailLabel, `Access resumes ${day} at ${time(status.nextOpen)}`);
+        } else {
+          setText(detailLabel, "Access restricted");
+        }
+      }
+      return restricted;
+    };
+  }
+
   // src/content/topbar.ts
   var popoverOpen = false;
   var userEditedUntilTime = false;
   var selectedMode = "countdown";
   var lastState = null;
   var outsideClickBound = false;
-  function formatClock(ms) {
-    const totalSec = Math.max(0, Math.ceil(ms / 1e3));
-    const mins = Math.floor(totalSec / 60);
-    const secs = totalSec % 60;
-    return `${mins}:${String(secs).padStart(2, "0")}`;
-  }
+  var lastSchedule = EMPTY_SCHEDULE;
+  var renderScheduleStrip;
   function isDarkTheme() {
     return document.documentElement.hasAttribute("dark");
   }
@@ -335,6 +484,24 @@
       <span id="yt-tt-status-pill" class="yt-tt-status yt-tt-status-idle">Off</span>
     </div>
 
+    <section id="yt-tt-schedule-strip" data-schedule-strip aria-label="Schedule status" hidden>
+      <div id="yt-tt-schedule-budget" data-schedule-budget class="yt-tt-budget-line" hidden>
+        <strong id="yt-tt-schedule-status" data-schedule-status></strong>
+        <span id="yt-tt-schedule-paused" data-schedule-paused hidden>Paused</span>
+        <span id="yt-tt-schedule-reset" data-schedule-reset></span>
+      </div>
+      <div id="yt-tt-schedule-window" data-schedule-window hidden>
+        <div class="yt-tt-window-labels" aria-hidden="true">
+          <span id="yt-tt-window-start" data-window-start></span>
+          <strong id="yt-tt-window-now" data-window-now></strong>
+          <span id="yt-tt-window-end" data-window-end></span>
+        </div>
+        <div id="yt-tt-window-progress" data-window-progress role="progressbar" aria-label="Scheduled access window"
+             aria-valuemin="0" aria-valuemax="100"></div>
+      </div>
+      <div id="yt-tt-schedule-detail" data-schedule-detail hidden></div>
+    </section>
+
     <div id="yt-tt-active-banner" class="yt-tt-active-strip yt-tt-hidden">
       <div class="yt-tt-active-meta">
         <span class="yt-tt-caption">Time remaining</span>
@@ -346,7 +513,7 @@
       </div>
     </div>
 
-    <div class="yt-tt-section">
+    <div id="yt-tt-session-setup" class="yt-tt-section">
       <div class="yt-tt-tabs" role="tablist">
         <button type="button" class="yt-tt-tab active" data-mode="countdown">Timer</button>
         <button type="button" class="yt-tt-tab" data-mode="until">End time</button>
@@ -428,7 +595,26 @@
         </span>
       </label>
     </div>
+    <p id="yt-tt-schedule-error" role="alert" hidden></p>
+    <button id="yt-tt-schedule-open" type="button" class="yt-tt-schedule-link">
+      <strong>Schedule</strong>
+      <span aria-hidden="true"></span>
+    </button>
   `;
+    renderScheduleStrip = bindScheduleStrip(pop.querySelector("#yt-tt-schedule-strip"));
+    const scheduleButton = pop.querySelector("#yt-tt-schedule-open");
+    scheduleButton.querySelector("span").style.maskImage = `url("${webext.runtime.getURL("assets/material/chevron_right.svg")}")`;
+    scheduleButton.addEventListener("click", async () => {
+      const response = await webext.runtime.sendMessage({ type: "OPEN_SCHEDULE_SETTINGS" }).catch(() => ({ error: "Could not open schedule settings." }));
+      if (response?.error) {
+        const error = pop.querySelector("#yt-tt-schedule-error");
+        error.textContent = "Could not open schedule settings.";
+        error.hidden = false;
+      } else {
+        closeTopbarPopover();
+        document.getElementById("yt-timetube-topbar-btn")?.focus();
+      }
+    });
     const logoImg = pop.querySelector(".yt-tt-pop-logo");
     if (logoImg) {
       logoImg.src = webext.runtime.getURL("assets/logo-main.svg");
@@ -543,8 +729,9 @@
     pop.querySelector("#yt-tt-show-durations")?.addEventListener("change", syncPolicy);
     return pop;
   }
-  function syncTopbarControl(state, onStateChange, onWake) {
+  function syncTopbarControl(state, schedule2, onStateChange, onWake) {
     lastState = state;
+    lastSchedule = schedule2;
     const container = getHeaderButtonsContainer();
     if (!container) return;
     let wrap = document.getElementById("yt-timetube-topbar-wrap");
@@ -642,20 +829,26 @@
     const activeBanner = pop.querySelector("#yt-tt-active-banner");
     const remainingEl = pop.querySelector("#yt-tt-remaining");
     const extendBtn = pop.querySelector("#yt-tt-extend");
-    const remainingMs = computeRemainingMs(state, Date.now());
+    const now = Date.now();
+    const { status, remainingMs } = buildSessionSnapshot(state, now);
+    const restricted = renderScheduleStrip?.(lastSchedule, now) ?? false;
+    pop.querySelector("#yt-tt-session-setup")?.classList.toggle(
+      "yt-tt-hidden",
+      restricted || status === "active" || status === "paused"
+    );
     if (pill && activeBanner && remainingEl && extendBtn) {
-      if (state.status === "active" || state.status === "paused") {
-        pill.textContent = state.status === "paused" ? "Paused" : state.spec?.mode === "maxLength" ? "Max length" : "Active";
-        pill.className = state.status === "paused" ? "yt-tt-status yt-tt-status-paused" : "yt-tt-status yt-tt-status-active";
+      if (status === "active" || status === "paused") {
+        pill.textContent = status === "paused" ? "Paused" : state.spec?.mode === "maxLength" ? "Max length" : "Active";
+        pill.className = status === "paused" ? "yt-tt-status yt-tt-status-paused" : "yt-tt-status yt-tt-status-active";
         activeBanner.classList.remove("yt-tt-hidden");
         if (state.spec?.mode === "maxLength") {
           remainingEl.textContent = `\u2264 ${state.spec.maxMinutes}m`;
           extendBtn.classList.add("yt-tt-hidden");
         } else {
-          remainingEl.textContent = remainingMs !== null ? formatClock(remainingMs) : "--:--";
+          remainingEl.textContent = remainingMs !== null ? formatMs(remainingMs) : "--:--";
           extendBtn.classList.remove("yt-tt-hidden");
         }
-      } else if (state.status === "expired") {
+      } else if (status === "expired") {
         pill.textContent = "Time up";
         pill.className = "yt-tt-status yt-tt-status-expired";
         activeBanner.classList.remove("yt-tt-hidden");
@@ -680,7 +873,8 @@
     if (hideNav) hideNav.checked = state.policy.hideShortsNavButton;
     if (showDur) showDur.checked = state.policy.showShortDurationBadges;
   }
-  function tickTopbarUI(state) {
+  function tickTopbarUI(state, schedule2) {
+    lastSchedule = schedule2;
     updateTopbarBadge(state);
     const pop = document.getElementById("yt-timetube-popover");
     if (pop && popoverOpen) {
@@ -772,15 +966,15 @@
     const { kind } = getScheduleStatus(schedule, Date.now());
     return kind === "closed" || kind === "spent";
   }
-  function publishScheduleSample() {
+  function publishScheduleSample(leaving = false) {
     if (!schedule.enabled) return;
     lastScheduleSampleAt = Date.now();
     const video = getActivePlayerVideo();
     webext.runtime.sendMessage({
       type: "SCHEDULE_SAMPLE",
       documentId: scheduleDocumentId,
-      visible: !document.hidden && !expiredScreenRendered,
-      playing: Boolean(video && !video.paused && !video.ended && !video.seeking && video.readyState >= 3)
+      visible: !leaving && !document.hidden && !expiredScreenRendered,
+      playing: !leaving && Boolean(video && !video.paused && !video.ended && !video.seeking && video.readyState >= 3)
     }).catch(() => void 0);
   }
   function getCurrentSnapshot() {
@@ -1725,6 +1919,7 @@
     syncShortsNavVisibility();
     syncTopbarControl(
       persistedState,
+      schedule,
       (next) => {
         persistedState = next;
         snoozedUntilReloadOrPopup = false;
@@ -1876,7 +2071,7 @@
     }, SWEEP_INTERVAL_MS);
     topbarTickInterval = window.setInterval(() => {
       if (document.hidden || expiredScreenRendered) return;
-      tickTopbarUI(persistedState);
+      tickTopbarUI(persistedState, schedule);
       const snap = getCurrentSnapshot();
       if (snap.status === "active" && snap.remainingMs !== null && snap.remainingMs > 0) {
         if (snap.remainingMs <= 3e4) {
@@ -1895,6 +2090,7 @@
         schedule = changes[SCHEDULE_KEY].newValue ?? EMPTY_SCHEDULE;
         if (schedule.enabled && !wasEnabled) publishScheduleSample();
         if (scheduleRestrictsAccess() !== scheduleBlocked) runFullSweep();
+        else tickTopbarUI(persistedState, schedule);
       }
       if (changes[STATE_KEY]?.newValue) {
         persistedState = changes[STATE_KEY].newValue;
@@ -1929,7 +2125,7 @@
       if (event.persisted) refreshSchedule();
     });
     window.addEventListener("pagehide", (event) => {
-      publishScheduleSample();
+      publishScheduleSample(true);
       if (event.persisted) return;
       if (scheduleHeartbeat !== null) window.clearInterval(scheduleHeartbeat);
       if (sweepTimer !== null) window.clearInterval(sweepTimer);
