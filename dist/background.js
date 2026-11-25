@@ -65,6 +65,7 @@ var DEFAULT_POLICY = {
   shortsLockCutoffMinutes: 5,
   hideShortsNavButton: true,
   showShortDurationBadges: true,
+  disableHoverPreviews: false,
   livestreams: "hide",
   unknownDuration: "hide",
   exceedAction: "hide",
@@ -288,6 +289,17 @@ async function wakeAllYouTubeTabs() {
   } catch {
   }
 }
+async function notifyYouTubeTabsOfPolicyUpdate(state) {
+  try {
+    const tabs = await webext.tabs.query({
+      url: ["https://www.youtube.com/*", "https://m.youtube.com/*"]
+    });
+    await Promise.allSettled(
+      tabs.filter((t) => typeof t.id === "number").map((t) => webext.tabs.sendMessage(t.id, { type: "POLICY_UPDATED", state }))
+    );
+  } catch {
+  }
+}
 async function handleMessage(msg) {
   const state = await loadState();
   const nowMs = Date.now();
@@ -434,6 +446,7 @@ async function handleMessage(msg) {
         policy: { ...state.policy, ...msg.patch }
       };
       await saveState(next);
+      await notifyYouTubeTabsOfPolicyUpdate(next);
       return next;
     }
     case "SET_AUTOPLAY_ONBOARDING": {
