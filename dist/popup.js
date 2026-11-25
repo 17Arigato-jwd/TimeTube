@@ -495,6 +495,7 @@ var cutoffRow = document.getElementById("cutoff-row");
 var exceedActionSelect = document.getElementById("exceed-action");
 var hideShortsNavCheckbox = document.getElementById("hide-shorts-nav");
 var showShortDurationsCheckbox = document.getElementById("show-short-durations");
+var disableHoverPreviewsCheckbox = document.getElementById("disable-hover-previews");
 function setModeTab(mode) {
   selectedMode = mode;
   document.querySelectorAll(".tt-tab").forEach((btn) => {
@@ -544,6 +545,7 @@ function renderState(state) {
   exceedActionSelect.value = state.policy.exceedAction;
   hideShortsNavCheckbox.checked = state.policy.hideShortsNavButton;
   showShortDurationsCheckbox.checked = state.policy.showShortDurationBadges;
+  disableHoverPreviewsCheckbox.checked = state.policy.disableHoverPreviews;
 }
 async function syncPolicy() {
   await webext.runtime.sendMessage({
@@ -553,7 +555,8 @@ async function syncPolicy() {
       shortsLockCutoffMinutes: Number(shortsCutoffSelect.value) === 10 ? 10 : 5,
       exceedAction: exceedActionSelect.value === "dim" ? "dim" : "hide",
       hideShortsNavButton: hideShortsNavCheckbox.checked,
-      showShortDurationBadges: showShortDurationsCheckbox.checked
+      showShortDurationBadges: showShortDurationsCheckbox.checked,
+      disableHoverPreviews: disableHoverPreviewsCheckbox.checked
     }
   });
 }
@@ -611,6 +614,7 @@ async function initPopup() {
   exceedActionSelect.addEventListener("change", syncPolicy);
   hideShortsNavCheckbox.addEventListener("change", syncPolicy);
   showShortDurationsCheckbox.addEventListener("change", syncPolicy);
+  disableHoverPreviewsCheckbox.addEventListener("change", syncPolicy);
   window.setInterval(() => {
     if (currentState) renderState(currentState);
   }, 1e3);

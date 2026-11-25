@@ -71,6 +71,23 @@ html:not([dark]) {
   display: none !important;
 }
 
+/* Hide YouTube's shared desktop thumbnail-preview layer when the user opts out. */
+html[data-timetube-disable-hover-previews="true"] #video-preview {
+  display: none !important;
+}
+
+html[data-timetube-disable-hover-previews="true"] ytd-moving-thumbnail-renderer,
+html[data-timetube-disable-hover-previews="true"] ytd-video-preview,
+html[data-timetube-disable-hover-previews="true"] animated-thumbnail-overlay-view-model,
+html[data-timetube-disable-hover-previews="true"] ytd-thumbnail video,
+html[data-timetube-disable-hover-previews="true"] yt-thumbnail-view-model video,
+html[data-timetube-disable-hover-previews="true"] ytd-video-renderer video,
+html[data-timetube-disable-hover-previews="true"] ytd-compact-video-renderer video,
+html[data-timetube-disable-hover-previews="true"] ytd-rich-item-renderer video,
+html[data-timetube-disable-hover-previews="true"] yt-lockup-view-model video {
+  display: none !important;
+}
+
 /* Lock page scrolling while a TimeTube prompt is active */
 .yt-timefit-modal-open,
 .yt-timefit-modal-open body {

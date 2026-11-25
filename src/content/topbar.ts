@@ -172,6 +172,14 @@ function buildPopover(onStateChange: (next: PersistedSessionState) => void): HTM
           <span class="yt-tt-switch-track"><span class="yt-tt-switch-knob"></span></span>
         </span>
       </label>
+
+      <label class="yt-tt-setting-row">
+        <span>Disable video previews on hover</span>
+        <span class="yt-tt-switch">
+          <input id="yt-tt-disable-hover-previews" type="checkbox" />
+          <span class="yt-tt-switch-track"><span class="yt-tt-switch-knob"></span></span>
+        </span>
+      </label>
     </div>
     <p id="yt-tt-schedule-error" role="alert" hidden></p>
     <button id="yt-tt-schedule-open" type="button" class="yt-tt-schedule-link">
@@ -302,6 +310,9 @@ function buildPopover(onStateChange: (next: PersistedSessionState) => void): HTM
     const exceed = pop.querySelector<HTMLSelectElement>('#yt-tt-exceed-action')?.value === 'dim' ? 'dim' : 'hide';
     const hideNav = Boolean(pop.querySelector<HTMLInputElement>('#yt-tt-hide-nav')?.checked);
     const showDur = Boolean(pop.querySelector<HTMLInputElement>('#yt-tt-show-durations')?.checked);
+    const disableHoverPreviews = Boolean(
+      pop.querySelector<HTMLInputElement>('#yt-tt-disable-hover-previews')?.checked,
+    );
 
     const next = await webext.runtime.sendMessage<PersistedSessionState>({
       type: 'UPDATE_POLICY',
@@ -311,6 +322,7 @@ function buildPopover(onStateChange: (next: PersistedSessionState) => void): HTM
         exceedAction: exceed,
         hideShortsNavButton: hideNav,
         showShortDurationBadges: showDur,
+        disableHoverPreviews,
       },
     });
     onStateChange(next);
@@ -321,6 +333,7 @@ function buildPopover(onStateChange: (next: PersistedSessionState) => void): HTM
   pop.querySelector('#yt-tt-exceed-action')?.addEventListener('change', syncPolicy);
   pop.querySelector('#yt-tt-hide-nav')?.addEventListener('change', syncPolicy);
   pop.querySelector('#yt-tt-show-durations')?.addEventListener('change', syncPolicy);
+  pop.querySelector('#yt-tt-disable-hover-previews')?.addEventListener('change', syncPolicy);
 
   return pop;
 }
@@ -491,6 +504,7 @@ function updatePopoverUI(pop: HTMLElement, state: PersistedSessionState): void {
   const exceedSelect = pop.querySelector<HTMLSelectElement>('#yt-tt-exceed-action');
   const hideNav = pop.querySelector<HTMLInputElement>('#yt-tt-hide-nav');
   const showDur = pop.querySelector<HTMLInputElement>('#yt-tt-show-durations');
+  const disableHoverPreviews = pop.querySelector<HTMLInputElement>('#yt-tt-disable-hover-previews');
 
   if (disableShorts) disableShorts.checked = state.policy.shortsMode === 'redirectToWatch';
   if (cutoffRow) cutoffRow.classList.toggle('yt-tt-hidden', state.policy.shortsMode === 'redirectToWatch');
@@ -498,6 +512,7 @@ function updatePopoverUI(pop: HTMLElement, state: PersistedSessionState): void {
   if (exceedSelect) exceedSelect.value = state.policy.exceedAction;
   if (hideNav) hideNav.checked = state.policy.hideShortsNavButton;
   if (showDur) showDur.checked = state.policy.showShortDurationBadges;
+  if (disableHoverPreviews) disableHoverPreviews.checked = state.policy.disableHoverPreviews;
 }
 
 export function tickTopbarUI(state: PersistedSessionState, schedule: ScheduleState): void {

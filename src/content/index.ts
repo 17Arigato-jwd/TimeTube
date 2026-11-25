@@ -1259,6 +1259,7 @@ function maybeShowLastExpiredNotice(): void {
 
 function runFullSweep(): void {
   scheduleBlocked = scheduleRestrictsAccess();
+  syncHoverPreviewPolicy();
   const snapshot = getCurrentSnapshot();
 
   if (expiredScreenRendered && snapshot.status !== 'expired') {
@@ -1364,6 +1365,48 @@ function runFullSweep(): void {
   nudgeInfiniteScrollIfSparse(visibleRegularCount);
 }
 
+function syncHoverPreviewPolicy(): void {
+  const enabled = persistedState.policy.disableHoverPreviews;
+
+  if (enabled) {
+    document.documentElement.setAttribute('data-timetube-disable-hover-previews', 'true');
+    document
+      .querySelectorAll<HTMLVideoElement>(
+        '#video-preview video, ytd-moving-thumbnail-renderer video, ytd-video-preview video, ytd-thumbnail video',
+      )
+      .forEach((video) => {
+        if (!video.paused) video.pause();
+      });
+  } else {
+    document.documentElement.removeAttribute('data-timetube-disable-hover-previews');
+  }
+}
+
+function attachHoverPreviewPlaybackGuard(): void {
+  document.addEventListener(
+    'play',
+    (event) => {
+      if (
+        !persistedState.policy.disableHoverPreviews
+      ) {
+        return;
+      }
+
+      const target = event.target;
+      if (
+        target instanceof HTMLVideoElement &&
+        !target.closest('#movie_player, #player') &&
+        target.closest(
+          '#video-preview, ytd-moving-thumbnail-renderer, ytd-video-preview, animated-thumbnail-overlay-view-model, ytd-thumbnail, yt-thumbnail-view-model',
+        )
+      ) {
+        target.pause();
+      }
+    },
+    true,
+  );
+}
+
 function attachShortClickInterceptor(): void {
   document.addEventListener(
     'click',
@@ -1413,6 +1456,7 @@ async function mountYouTubeFilterHost(): Promise<void> {
   attachModalInputBlocker();
   attachShortClickInterceptor();
   attachDocumentMediaListeners();
+  attachHoverPreviewPlaybackGuard();
   runFullSweep();
 
   const maybeRedirectShortImmediately = () => {
@@ -1512,7 +1556,16 @@ async function mountYouTubeFilterHost(): Promise<void> {
   }
 
   webext.runtime.onMessage.addListener((msg) => {
-    if (msg && typeof msg === 'object' && (msg as { type?: string }).type === 'WAKE_FROM_POPUP') {
+    if (!msg || typeof msg !== 'object') return;
+
+    const type = (msg as { type?: string }).type;
+    if (type === 'POLICY_UPDATED' && 'state' in msg) {
+      persistedState = (msg as { state: PersistedSessionState }).state;
+      runFullSweep();
+      return;
+    }
+
+    if (type === 'WAKE_FROM_POPUP') {
       snoozedUntilReloadOrPopup = false;
       checkAutoplayWhilePlaying();
       runFullSweep();

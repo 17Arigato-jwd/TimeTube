@@ -35,6 +35,7 @@ export interface FilterPolicy {
   shortsLockCutoffMinutes: 5 | 10;
   hideShortsNavButton: boolean;
   showShortDurationBadges: boolean;
+  disableHoverPreviews: boolean;
   livestreams: 'hide' | 'allow';
   unknownDuration: 'hide' | 'allow';
   exceedAction: 'hide' | 'dim';
@@ -106,6 +107,7 @@ export const DEFAULT_POLICY: FilterPolicy = {
   shortsLockCutoffMinutes: 5,
   hideShortsNavButton: true,
   showShortDurationBadges: true,
+  disableHoverPreviews: false,
   livestreams: 'hide',
   unknownDuration: 'hide',
   exceedAction: 'hide',
@@ -143,6 +145,7 @@ export type RuntimeMessage =
   | { type: 'RESUME_TIMER' }
   | { type: 'STOP_SESSION' }
   | { type: 'UPDATE_POLICY'; patch: Partial<FilterPolicy> }
+  | { type: 'POLICY_UPDATED'; state: PersistedSessionState }
   | { type: 'SET_AUTOPLAY_ONBOARDING'; state: AutoplayOnboardingState }
   | { type: 'ACK_SHORTS_PROMPT'; stage: 'nudge_50' | 'nudge_25' }
   | { type: 'LOCK_SHORTS_FOR_SESSION' }
