@@ -1,3 +1,4 @@
+import { EMPTY_SCHEDULE, getScheduleStatus, SCHEDULE_KEY, type ScheduleState, type ScheduledStartResponse } from '../core/schedule';
 import {
   extractShortIdFromHref,
   formatDurationBadge,
@@ -88,11 +89,37 @@ let mutationDebounceTimer: number | null = null;
 let lastScrollNudgeMs = 0;
 let consecutiveScrollNudges = 0;
 
+let schedule = EMPTY_SCHEDULE;
+const scheduleDocumentId = crypto.randomUUID();
+let scheduleBlocked = false;
+let scheduleHeartbeat: number | null = null;
+let lastScheduleSampleAt = 0;
+
+function scheduleRestrictsAccess(): boolean {
+  const { kind } = getScheduleStatus(schedule, Date.now());
+  return kind === 'closed' || kind === 'spent';
+}
+
+function publishScheduleSample(leaving = false): void {
+  if (!schedule.enabled) return;
+  lastScheduleSampleAt = Date.now();
+  const video = getActivePlayerVideo();
+  webext.runtime.sendMessage({
+    type: 'SCHEDULE_SAMPLE',
+    documentId: scheduleDocumentId,
+    visible: !leaving && !document.hidden && !expiredScreenRendered,
+    playing: !leaving && Boolean(video && !video.paused && !video.ended && !video.seeking && video.readyState >= 3),
+  }).catch(() => undefined);
+}
+
 function getCurrentSnapshot(): SessionSnapshot {
-  return buildSessionSnapshot(persistedState, Date.now(), {
+  const snapshot = buildSessionSnapshot(persistedState, Date.now(), {
     snoozed: snoozedUntilReloadOrPopup,
     autoplayObserved,
   });
+  return scheduleRestrictsAccess()
+    ? { ...snapshot, status: 'expired', remainingMs: 0, maxAllowedVideoSeconds: null }
+    : snapshot;
 }
 
 function isWatchPage(): boolean {
@@ -713,8 +740,9 @@ function renderExpiredTakeover(): void {
   title.textContent = "Time's up :)";
 
   const message = document.createElement('p');
-  message.textContent =
-    'Your YouTube break has ended. You can start a new session or stop the timer from the TimeTube extension menu whenever you are ready.';
+  message.textContent = scheduleBlocked
+    ? 'Your YouTube schedule is restricting access. Open TimeTube to see when you can watch again.'
+    : 'Your YouTube break has ended. You can start a new session or stop the timer from the TimeTube extension menu whenever you are ready.';
 
   card.appendChild(title);
   card.appendChild(message);
@@ -1182,11 +1210,23 @@ function maybeShowLastExpiredNotice(): void {
       variant: 'primary',
       onClick: async () => {
         removeModal();
-        persistedState = await webext.runtime.sendMessage<PersistedSessionState>({
-          type: 'START_SESSION',
+        const result = await webext.runtime.sendMessage<ScheduledStartResponse>({
+          type: 'START_SCHEDULED_SESSION',
           spec: lastSpec,
-        });
-        runFullSweep();
+        }).catch(() => null);
+        if (result?.kind === 'start') {
+          persistedState = result.state;
+          runFullSweep();
+        } else {
+          showModal(
+            'repeat_schedule_conflict',
+            'Session could not start',
+            result?.kind === 'conflict'
+              ? 'Open the TimeTube toolbar popup to shorten the session or add extra time.'
+              : 'Open the TimeTube toolbar popup to check your schedule and try again.',
+            [{ label: 'Close', variant: 'secondary', onClick: removeModal }],
+          );
+        }
       },
     });
   }
@@ -1218,6 +1258,7 @@ function maybeShowLastExpiredNotice(): void {
 }
 
 function runFullSweep(): void {
+  scheduleBlocked = scheduleRestrictsAccess();
   syncHoverPreviewPolicy();
   const snapshot = getCurrentSnapshot();
 
@@ -1226,7 +1267,7 @@ function runFullSweep(): void {
     return;
   }
 
-  if (!snoozedUntilReloadOrPopup && snapshot.status === 'expired') {
+  if (snapshot.status === 'expired' && (scheduleBlocked || !snoozedUntilReloadOrPopup)) {
     renderExpiredTakeover();
     return;
   }
@@ -1235,6 +1276,7 @@ function runFullSweep(): void {
   syncShortsNavVisibility();
   syncTopbarControl(
     persistedState,
+    schedule,
     (next) => {
       persistedState = next;
       snoozedUntilReloadOrPopup = false;
@@ -1407,6 +1449,23 @@ async function mountYouTubeFilterHost(): Promise<void> {
     persistedState = { ...INITIAL_PERSISTED_STATE };
   }
 
+  let scheduleChanged = false;
+  let scheduleReady = false;
+  webext.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes[SCHEDULE_KEY]) return;
+    scheduleChanged = true;
+    const wasEnabled = schedule.enabled;
+    schedule = (changes[SCHEDULE_KEY].newValue as ScheduleState | undefined) ?? EMPTY_SCHEDULE;
+    if (!scheduleReady) return;
+    if (schedule.enabled && !wasEnabled) publishScheduleSample();
+    if (scheduleRestrictsAccess() !== scheduleBlocked) runFullSweep();
+    else tickTopbarUI(persistedState, schedule);
+  });
+
+  const storedSchedule = await webext.storage.local.get<{ [SCHEDULE_KEY]?: ScheduleState }>(SCHEDULE_KEY)
+    .catch(() => ({} as { [SCHEDULE_KEY]?: ScheduleState }));
+  if (!scheduleChanged) schedule = storedSchedule[SCHEDULE_KEY] ?? EMPTY_SCHEDULE;
+
   attachModalInputBlocker();
   attachShortClickInterceptor();
   attachDocumentMediaListeners();
@@ -1462,7 +1521,7 @@ async function mountYouTubeFilterHost(): Promise<void> {
 
   topbarTickInterval = window.setInterval(() => {
     if (document.hidden || expiredScreenRendered) return;
-    tickTopbarUI(persistedState);
+    tickTopbarUI(persistedState, schedule);
     const snap = getCurrentSnapshot();
     if (snap.status === 'active' && snap.remainingMs !== null && snap.remainingMs > 0) {
       if (snap.remainingMs <= 30_000) {
@@ -1476,10 +1535,32 @@ async function mountYouTubeFilterHost(): Promise<void> {
   }, 1000);
 
   webext.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local' || !changes[STATE_KEY]?.newValue) return;
-    persistedState = changes[STATE_KEY].newValue as PersistedSessionState;
-    runFullSweep();
+    if (area !== 'local') return;
+    if (changes[STATE_KEY]?.newValue) {
+      persistedState = changes[STATE_KEY].newValue as PersistedSessionState;
+      runFullSweep();
+    }
   });
+
+  const refreshSchedule = () => {
+    if (scheduleRestrictsAccess() !== scheduleBlocked) runFullSweep();
+    publishScheduleSample();
+  };
+  scheduleReady = true;
+  refreshSchedule();
+  scheduleHeartbeat = window.setInterval(refreshSchedule, 1000);
+  document.addEventListener('visibilitychange', refreshSchedule);
+  document.addEventListener('timeupdate', (event) => {
+    // Media events continue when the browser throttles background timers.
+    if (event.target === getActivePlayerVideo() && Date.now() - lastScheduleSampleAt >= 1000) {
+      refreshSchedule();
+    }
+  }, true);
+  for (const event of ['playing', 'pause', 'waiting', 'seeking', 'seeked', 'ended']) {
+    document.addEventListener(event, (event) => {
+      if (event.target instanceof HTMLVideoElement) publishScheduleSample();
+    }, true);
+  }
 
   webext.runtime.onMessage.addListener((msg) => {
     if (!msg || typeof msg !== 'object') return;
@@ -1498,7 +1579,13 @@ async function mountYouTubeFilterHost(): Promise<void> {
     }
   });
 
-  window.addEventListener('pagehide', () => {
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) refreshSchedule();
+  });
+  window.addEventListener('pagehide', (event) => {
+    publishScheduleSample(true);
+    if (event.persisted) return;
+    if (scheduleHeartbeat !== null) window.clearInterval(scheduleHeartbeat);
     if (sweepTimer !== null) window.clearInterval(sweepTimer);
     if (topbarTickInterval !== null) window.clearInterval(topbarTickInterval);
     if (exactExpiryTimer !== null) window.clearTimeout(exactExpiryTimer);

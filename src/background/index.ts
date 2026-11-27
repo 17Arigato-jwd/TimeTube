@@ -1,3 +1,5 @@
+import { runScheduleMessage, type ScheduleMessage } from './schedule';
+import { SCHEDULE_KEY, type ScheduleState } from '../core/schedule';
 import { extractLengthSecondsFromHtml, formatApproxRemaining } from '../core/duration';
 import {
   computeRemainingMs,
@@ -5,6 +7,7 @@ import {
   shouldAutoResetExpiredSession,
 } from '../core/policy';
 import {
+  BudgetSpec,
   INITIAL_PERSISTED_STATE,
   PersistedSessionState,
   RuntimeMessage,
@@ -47,8 +50,10 @@ async function loadState(): Promise<PersistedSessionState> {
   };
 }
 
-async function saveState(state: PersistedSessionState): Promise<void> {
-  await webext.storage.local.set({ [STATE_KEY]: state });
+async function saveState(state: PersistedSessionState, schedule?: ScheduleState): Promise<void> {
+  const changes: Record<string, unknown> = { [STATE_KEY]: state };
+  if (schedule) changes[SCHEDULE_KEY] = schedule;
+  await webext.storage.local.set(changes);
   await syncAlarmsAndBadge(state);
 }
 
@@ -245,6 +250,32 @@ async function wakeAllYouTubeTabs(): Promise<void> {
   }
 }
 
+async function startSession(
+  state: PersistedSessionState,
+  spec: BudgetSpec,
+  nowMs: number,
+  endsAtMs: number | null,
+  schedule?: ScheduleState,
+): Promise<PersistedSessionState> {
+  const next: PersistedSessionState = {
+    ...state,
+    id: `sess_${nowMs}`,
+    status: 'active',
+    spec,
+    startedAtMs: nowMs,
+    endsAtMs,
+    pausedAtMs: null,
+    pausedRemainingMs: null,
+    allYouTubeClosedAtMs: null,
+    lastExpiredNotice: null,
+    shortsLockedForSession: false,
+    acknowledgedPrompts: { nudge_50: false, nudge_25: false },
+  };
+  await saveState(next, schedule);
+  await wakeAllYouTubeTabs();
+  return next;
+}
+
 async function notifyYouTubeTabsOfPolicyUpdate(state: PersistedSessionState): Promise<void> {
   try {
     const tabs = await webext.tabs.query({
@@ -265,6 +296,9 @@ async function handleMessage(msg: RuntimeMessage): Promise<unknown> {
   const nowMs = Date.now();
 
   switch (msg.type) {
+    case 'OPEN_SCHEDULE_SETTINGS':
+      await webext.runtime.openOptionsPage();
+      return {};
     case 'GET_STATE': {
       if (shouldAutoResetExpiredSession(state, nowMs, EXPIRED_AUTO_RESET_MS)) {
         return finalizeExpiredAutoReset(state, nowMs);
@@ -288,28 +322,6 @@ async function handleMessage(msg: RuntimeMessage): Promise<unknown> {
       }
       await syncAlarmsAndBadge(state);
       return state;
-    }
-
-    case 'START_SESSION': {
-      const bounds = resolveBudgetBounds(msg.spec, nowMs);
-      const next: PersistedSessionState = {
-        ...state,
-        id: `sess_${nowMs}`,
-        status: 'active',
-        spec: msg.spec,
-        startedAtMs: bounds.startedAtMs,
-        endsAtMs: bounds.endsAtMs,
-        pausedAtMs: null,
-        pausedRemainingMs: null,
-        allYouTubeClosedAtMs: null,
-        lastExpiredNotice: null,
-        shortsLockedForSession: false,
-        acknowledgedPrompts: { nudge_50: false, nudge_25: false },
-        policy: { ...state.policy, ...(msg.policyOverrides ?? {}) },
-      };
-      await saveState(next);
-      await wakeAllYouTubeTabs();
-      return next;
     }
 
     case 'EXTEND_SESSION': {
@@ -479,12 +491,23 @@ async function handleMessage(msg: RuntimeMessage): Promise<unknown> {
   }
 }
 
+async function handleScheduleMessage(message: ScheduleMessage, sender: unknown): Promise<unknown> {
+  return runScheduleMessage(message, sender, async (spec, now, endsAtMs, schedule) =>
+    startSession(await loadState(), spec, now, endsAtMs, schedule),
+  );
+}
+
 export function bootBackgroundSessionRuntime(): void {
   webext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || typeof message !== 'object' || !('type' in message)) {
       return false;
     }
-    handleMessage(message as RuntimeMessage)
+    const request = message as RuntimeMessage;
+    const response =
+      request.type === 'SAVE_SCHEDULE' || request.type === 'SCHEDULE_SAMPLE' || request.type === 'START_SCHEDULED_SESSION'
+        ? handleScheduleMessage(request, _sender)
+        : handleMessage(request);
+    response
       .then((res) => sendResponse(res))
       .catch((err) => sendResponse({ error: String(err) }));
     return true;

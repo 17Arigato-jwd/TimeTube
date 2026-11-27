@@ -1,3 +1,5 @@
+import { formatMs } from '../shared/clock';
+import { initSchedulePopup, renderSchedule, startScheduledSession } from './schedule';
 import { getDefaultEndTime } from '../core/duration';
 import { buildSessionSnapshot } from '../core/policy';
 import { BudgetSpec, PersistedSessionState } from '../core/types';
@@ -28,13 +30,6 @@ const hideShortsNavCheckbox = document.getElementById('hide-shorts-nav') as HTML
 const showShortDurationsCheckbox = document.getElementById('show-short-durations') as HTMLInputElement;
 const disableHoverPreviewsCheckbox = document.getElementById('disable-hover-previews') as HTMLInputElement;
 
-function formatMs(ms: number): string {
-  const totalSec = Math.max(0, Math.ceil(ms / 1000));
-  const mins = Math.floor(totalSec / 60);
-  const secs = totalSec % 60;
-  return `${mins}:${String(secs).padStart(2, '0')}`;
-}
-
 function setModeTab(mode: BudgetSpec['mode']): void {
   selectedMode = mode;
   document.querySelectorAll<HTMLButtonElement>('.tt-tab').forEach((btn) => {
@@ -56,7 +51,8 @@ function renderState(state: PersistedSessionState): void {
   currentState = state;
   const { status, remainingMs } = buildSessionSnapshot(state, Date.now());
   const sessionInProgress = status === 'active' || status === 'paused';
-  sessionSetup.classList.toggle('hidden', sessionInProgress);
+  const scheduleRestricted = renderSchedule();
+  sessionSetup.classList.toggle('hidden', sessionInProgress || scheduleRestricted);
 
   if (sessionInProgress) {
     statusPill.textContent =
@@ -117,6 +113,9 @@ async function initPopup(): Promise<void> {
     renderState(changes[STATE_KEY].newValue as PersistedSessionState);
   });
 
+  await initSchedulePopup(() => {
+    if (currentState) renderState(currentState);
+  });
   await webext.runtime.sendMessage({ type: 'WAKE_FROM_POPUP' }).catch(() => undefined);
   const state = await webext.runtime.sendMessage<PersistedSessionState>({ type: 'GET_STATE' });
   untilInput.value = getDefaultEndTime();
@@ -150,10 +149,7 @@ async function initPopup(): Promise<void> {
       spec = { mode: 'maxLength', maxMinutes: Math.max(1, Number(maxLengthInput.value) || 15) };
     }
 
-    await webext.runtime.sendMessage({
-      type: 'START_SESSION',
-      spec,
-    });
+    await startScheduledSession(spec);
   });
 
   extendBtn.addEventListener('click', async () => {

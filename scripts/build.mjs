@@ -21,10 +21,10 @@ await Promise.all([
   }),
   build({
     ...common,
-    entryPoints: ['src/popup/index.ts'],
-    outfile: 'dist/popup.js',
+    entryPoints: { popup: 'src/popup/index.ts', schedule: 'src/options/index.ts' },
+    outdir: 'dist',
     format: 'esm',
   }),
 ]);
 
-console.log('Built dist/background.js, dist/content.js, and dist/popup.js');
+console.log('Built background, content, popup, and schedule bundles');

@@ -411,3 +411,130 @@ body {
 .hidden {
   display: none !important;
 }
+
+#schedule-strip {
+  display: grid;
+  gap: 6px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--tt-border);
+  background: var(--tt-bg-elevated);
+  color: var(--tt-text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+#schedule-strip[hidden],
+#schedule-strip [hidden] {
+  display: none;
+}
+
+.tt-budget-line,
+.tt-window-labels {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+}
+
+#schedule-strip strong {
+  color: var(--tt-text-primary);
+  font-weight: 600;
+}
+
+#schedule-reset { margin-inline-start: auto; }
+.tt-window-labels { justify-content: space-between; }
+
+#window-progress {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  gap: 2px;
+  margin-top: 4px;
+}
+
+#window-progress span {
+  height: 5px;
+  border-radius: 1px;
+  background: var(--tt-bg-hover);
+}
+
+#window-progress .elapsed { background: var(--tt-text-primary); }
+
+@media (forced-colors: active) {
+  #window-progress span { border: 1px solid GrayText; }
+  #window-progress .elapsed { background: CanvasText; forced-color-adjust: none; }
+}
+
+.tt-schedule-link {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-align: start;
+  width: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--tt-border);
+  color: var(--tt-text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.tt-schedule-link:hover { background: var(--tt-bg-subtle); }
+.tt-schedule-link:focus-visible { outline: 2px solid var(--tt-accent); outline-offset: -3px; }
+.tt-material-chevron {
+  width: 20px;
+  height: 20px;
+  background: currentColor;
+  color: var(--tt-text-secondary);
+  -webkit-mask: url("../assets/material/chevron_right.svg") center / contain no-repeat;
+  mask: url("../assets/material/chevron_right.svg") center / contain no-repeat;
+  forced-color-adjust: none;
+}
+
+@media (forced-colors: active) {
+  .tt-material-chevron { color: ButtonText; }
+}
+
+.tt-field-error {
+  color: var(--tt-red-text);
+}
+
+#session-start-error {
+  margin: 0 16px 12px;
+}
+
+.tt-conflict {
+  width: min(320px, calc(100% - 24px));
+  box-sizing: border-box;
+  padding: 16px;
+  border: 1px solid var(--tt-border);
+  border-radius: 14px;
+  background: var(--tt-bg-elevated);
+  color: inherit;
+}
+
+.tt-conflict:modal {
+  overscroll-behavior: contain;
+}
+
+.tt-conflict::backdrop {
+  overflow: hidden;
+  background: rgb(0 0 0 / 65%);
+}
+
+.tt-conflict h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.tt-conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tt-conflict button:disabled {
+  cursor: default;
+  opacity: .55;
+}

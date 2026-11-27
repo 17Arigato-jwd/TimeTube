@@ -1,0 +1,226 @@
+body.tt-schedule-page {
+  width: auto;
+  color-scheme: light dark;
+}
+
+.tt-schedule-layout {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: clamp(16px, 4vw, 48px);
+  display: grid;
+  gap: 20px;
+}
+
+.tt-schedule-heading h1 {
+  line-height: 1.15;
+  font-size: clamp(26px, 5vw, 36px);
+  margin: 20px 0 0;
+}
+
+.tt-schedule-layout h2 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.tt-schedule-card,
+.tt-rules li {
+  border: 1px solid var(--tt-border);
+  border-radius: 12px;
+  padding: 14px;
+  background: var(--tt-bg-elevated);
+}
+
+.tt-schedule-card .tt-switch-track {
+  pointer-events: none;
+}
+
+.tt-schedule-toolbar,
+.tt-rules li,
+.tt-schedule-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tt-rules {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin-bottom: 0;
+  list-style: none;
+}
+
+.tt-rules li strong,
+.tt-rules li span {
+  display: block;
+}
+
+.tt-rules li span,
+#site-hint,
+#playback-hint,
+#overnight,
+#empty-rules {
+  color: var(--tt-text-secondary);
+}
+
+.tt-rule-editor {
+  display: grid;
+  gap: 16px;
+}
+
+.tt-rule-editor fieldset {
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  border: 0;
+}
+
+.tt-rule-editor legend {
+  padding: 0;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.tt-rule-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 12px;
+}
+
+.tt-rule-fields label {
+  display: grid;
+  gap: 4px;
+}
+
+.tt-rule-fields .tt-input {
+  width: 100%;
+}
+
+.tt-day-options,
+.tt-counting-options,
+.tt-schedule-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.tt-day-options {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.tt-day-options label {
+  position: relative;
+}
+
+.tt-day-options input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.tt-day-options span {
+  display: block;
+  padding: 6px 10px;
+  border: 1px solid var(--tt-border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.tt-day-options input:checked + span {
+  background: var(--tt-chip-active-bg);
+  color: var(--tt-chip-active-text);
+}
+
+.tt-day-options input:focus-visible + span,
+.tt-counting-options input:focus-visible {
+  outline: 2px solid var(--tt-accent);
+  outline-offset: 2px;
+}
+
+.tt-counting-options {
+  display: flex;
+  gap: 12px;
+}
+
+.tt-rule-editor p {
+  margin: 0;
+}
+
+.tt-editor-actions,
+.tt-schedule-footer {
+  justify-content: flex-end;
+}
+
+#remove-rule,
+#save-status {
+  margin-right: auto;
+}
+
+.tt-field-error {
+  color: var(--tt-red-text);
+}
+
+.tt-pill-btn:disabled {
+  cursor: default;
+  opacity: .55;
+}
+
+.tt-schedule-layout { gap: 28px; }
+.tt-schedule-heading { border-bottom: 1px solid var(--tt-border); padding-bottom: 24px; }
+.tt-schedule-heading h1 { letter-spacing: -.03em; }
+.tt-rule-editor { padding: clamp(16px, 3vw, 28px); gap: 22px; }
+.tt-rules { gap: 0; }
+.tt-rules li { border: 0; border-bottom: 1px solid var(--tt-border); border-radius: 0; background: transparent; padding: 16px 0; }
+.tt-rules li span { margin-top: 3px; font-variant-numeric: tabular-nums; }
+.tt-rule-fields input { min-height: 40px; }
+.tt-counting-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); }
+.tt-counting-options label { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 8px; border: 1px solid var(--tt-border); border-radius: 10px; padding: 12px; cursor: pointer; }
+.tt-counting-options label:has(:checked) { border-color: var(--tt-text-primary); }
+.tt-counting-options input { margin: 0; accent-color: var(--tt-accent); }
+.tt-counting-options small { grid-column: 2; }
+.tt-rule-editor [aria-pressed="true"] { background: var(--tt-chip-active-bg); color: var(--tt-chip-active-text); }
+.tt-schedule-footer { padding-top: 16px; border-top: 1px solid var(--tt-border); }
+
+#weekly-rules.tt-rules-disabled .tt-rules {
+  color: var(--tt-text-secondary);
+  opacity: .65;
+}
+
+.tt-rule-section {
+  border-top: 1px solid var(--tt-border);
+  padding-top: 18px;
+}
+
+.tt-section-choice {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 36px;
+  cursor: pointer;
+}
+
+.tt-section-choice input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--tt-accent);
+}
+
+.tt-rule-section > fieldset {
+  margin-top: 10px;
+}
+
+.tt-rule-section .tt-count-mode {
+  margin-top: 16px;
+}
+
+.tt-rule-section > fieldset:disabled {
+  opacity: .55;
+}
+
+.tt-remove-dialog .tt-schedule-actions {
+  justify-content: flex-end;
+}

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>YouTube schedule — TimeTube</title>
+  <link rel="stylesheet" href="popup.css" />
+  <link rel="stylesheet" href="schedule.css" />
+</head>
+<body class="tt-schedule-page">
+  <main class="tt-schedule-layout">
+    <header class="tt-schedule-heading">
+      <div class="tt-brand"><img src="../assets/icon-32.png" alt="" width="24" height="24" /> TimeTube</div>
+      <h1>YouTube schedule</h1>
+    </header>
+    <label class="tt-setting-row tt-schedule-card">
+      <strong>Enable schedule</strong>
+      <span class="tt-switch">
+        <input id="enabled" type="checkbox" aria-describedby="schedule-save-error" disabled />
+        <span class="tt-switch-track"><span class="tt-switch-knob"></span></span>
+      </span>
+    </label>
+
+    <section id="weekly-rules" aria-labelledby="rules-title">
+      <div class="tt-schedule-toolbar">
+        <h2 id="rules-title">Weekly rules</h2>
+        <button id="add-rule" type="button" class="tt-pill-btn tt-pill-tonal" disabled>Add rule</button>
+      </div>
+      <p id="empty-rules">Days without a rule have no scheduled limit.</p>
+      <ul id="rules" class="tt-rules"></ul>
+    </section>
+
+    <form id="rule-editor" class="tt-schedule-card tt-rule-editor hidden" novalidate>
+      <h2 id="editor-title">Add rule</h2>
+      <fieldset aria-describedby="days-error">
+        <legend>Days</legend>
+        <div class="tt-schedule-actions">
+          <button class="tt-pill-btn tt-pill-tonal" type="button" data-days="1,2,3,4,5,6,0">Every day</button>
+          <button class="tt-pill-btn tt-pill-tonal" type="button" data-days="1,2,3,4,5">Weekdays</button>
+          <button class="tt-pill-btn tt-pill-tonal" type="button" data-days="6,0">Weekends</button>
+        </div>
+        <div id="day-options" class="tt-day-options"></div>
+        <p id="days-error" class="tt-field-error" role="alert" hidden></p>
+      </fieldset>
+      <p id="sections-error" class="tt-field-error" role="alert" hidden></p>
+      <section class="tt-rule-section" aria-labelledby="window-label">
+        <label class="tt-section-choice"><input id="window-enabled" type="checkbox" aria-describedby="sections-error" /><strong id="window-label">Access window</strong></label>
+        <fieldset id="window-fields" aria-labelledby="window-label">
+          <div class="tt-rule-fields">
+            <label>Start <input type="time" id="rule-start" class="tt-input" required aria-describedby="time-error" /></label>
+            <label>End <input type="time" id="rule-end" class="tt-input" required aria-describedby="overnight time-error" /></label>
+          </div>
+          <p id="overnight" hidden>Ends the next day.</p>
+          <p id="time-error" class="tt-field-error" role="alert" hidden></p>
+        </fieldset>
+      </section>
+      <section class="tt-rule-section" aria-labelledby="limit-label">
+        <label class="tt-section-choice"><input id="limit-enabled" type="checkbox" aria-describedby="sections-error" /><strong id="limit-label">Daily limit</strong></label>
+        <fieldset id="limit-fields" aria-labelledby="limit-label">
+          <div class="tt-rule-fields">
+            <label>Daily limit (minutes) <input type="number" id="rule-limit" class="tt-input" min="1" max="1440" step="1" required aria-describedby="limit-error" /></label>
+            <label>Reset at <input type="time" id="rule-reset" class="tt-input" required aria-describedby="reset-error" /></label>
+          </div>
+          <p id="limit-error" class="tt-field-error" role="alert" hidden></p>
+          <p id="reset-error" class="tt-field-error" role="alert" hidden></p>
+          <fieldset class="tt-count-mode">
+            <legend>Count usage</legend>
+            <div class="tt-counting-options">
+              <label><input type="radio" name="mode" value="site" aria-describedby="site-hint" /> Time on YouTube <small id="site-hint">While a YouTube tab is visible</small></label>
+              <label><input type="radio" name="mode" value="playback" aria-describedby="playback-hint" /> Active playback <small id="playback-hint">While a video is playing</small></label>
+            </div>
+          </fieldset>
+        </fieldset>
+      </section>
+      <div class="tt-schedule-actions tt-editor-actions">
+        <button id="remove-rule" type="button" class="tt-pill-btn tt-pill-danger">Remove rule</button>
+        <button id="cancel-rule" type="button" class="tt-pill-btn tt-pill-tonal">Cancel edit</button>
+        <button type="submit" class="tt-pill-btn tt-pill-tonal">Apply rule</button>
+      </div>
+    </form>
+
+    <p id="schedule-save-error" class="tt-field-error" role="alert" hidden></p>
+    <footer class="tt-schedule-actions tt-schedule-footer">
+      <span id="save-status" role="status"></span>
+      <button id="cancel-schedule" type="button" class="tt-pill-btn tt-pill-tonal" disabled>Cancel</button>
+      <button id="save-schedule" type="button" class="tt-pill-btn tt-pill-primary" disabled>Save schedule</button>
+    </footer>
+  </main>
+  <dialog id="remove-dialog" class="tt-conflict tt-remove-dialog" aria-labelledby="remove-heading" aria-describedby="remove-description">
+    <h2 id="remove-heading">Remove rule?</h2>
+    <p id="remove-description"></p>
+    <form method="dialog" class="tt-schedule-actions">
+      <button type="submit" id="cancel-remove" value="cancel" class="tt-pill-btn tt-pill-tonal" autofocus>Cancel</button>
+      <button type="submit" id="confirm-remove" value="remove" class="tt-pill-btn tt-pill-danger">Remove rule</button>
+    </form>
+  </dialog>
+  <script type="module" src="../dist/schedule.js"></script>
+</body>
+</html>

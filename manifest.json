@@ -28,6 +28,10 @@
     "scripts": ["dist/background.js"],
     "type": "module"
   },
+  "options_ui": {
+    "page": "popup/schedule.html",
+    "open_in_tab": true
+  },
   "action": {
     "default_title": "TimeTube",
     "default_popup": "popup/popup.html",
@@ -54,7 +58,8 @@
       "resources": [
         "assets/topbar-empty.svg",
         "assets/topbar-badge.svg",
-        "assets/logo-main.svg"
+        "assets/logo-main.svg",
+        "assets/material/chevron_right.svg"
       ],
       "matches": [
         "https://www.youtube.com/*",
