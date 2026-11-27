@@ -231,21 +231,32 @@ test('schedule messages recover failed charges and toggle the latest rules from 
   const { runScheduleMessage } = await import('../src/background/schedule');
   const noManualStart = async () => assert.fail('unexpected manual start');
   const sender = { tab: { id: 1 } };
-  const sample = () => runScheduleMessage(
-    { type: 'SCHEDULE_SAMPLE', documentId: 'document', visible: false, playing: true }, sender, noManualStart,
+  const sample = (playing: boolean) => runScheduleMessage(
+    { type: 'SCHEDULE_SAMPLE', documentId: 'document', visible: true, playing }, sender, noManualStart,
   );
 
-  await sample();
+  await sample(true);
   now += 1000;
   failWrite = true;
-  await assert.rejects(sample(), /storage unavailable/);
+  await assert.rejects(sample(false), /storage unavailable/);
+  now += 1000;
+  await assert.rejects(sample(true), /storage unavailable/);
   now += 1000;
   failWrite = false;
-  await sample();
+  await sample(false);
+  assert.equal(stored.usage['2026-11-23']?.usedMs, 2000);
+  now += 1000;
+  await sample(false);
   assert.equal(stored.usage['2026-11-23']?.usedMs, 2000);
 
+  await sample(true);
+  now += 1000;
+  failWrite = true;
+  await assert.rejects(sample(false), /storage unavailable/);
+  failWrite = false;
   await runScheduleMessage({ type: 'SAVE_SCHEDULE', enabled: false }, undefined, noManualStart);
   assert.equal(stored.enabled, false);
+  assert.equal(stored.usage['2026-11-23']?.usedMs, 3000);
   assert.equal(stored.rules[0]?.windowEnabled, false);
   await runScheduleMessage({ type: 'SAVE_SCHEDULE', enabled: true }, undefined, noManualStart);
   assert.equal(stored.enabled, true);

@@ -1,6 +1,6 @@
 import {
   EMPTY_SCHEDULE, migrateSchedule, updateCounting, MAX_SAMPLE_GAP_MS, recordUsage, resolveScheduledStart, SCHEDULE_KEY,
-  validateSchedule, type ScheduleState,
+  validateSchedule, type Activity, type ScheduleState,
 } from '../core/schedule';
 import type { BudgetSpec, PersistedSessionState, RuntimeMessage } from '../core/types';
 import { webext } from '../shared/webext';
@@ -11,8 +11,16 @@ export type ScheduleMessage = Extract<RuntimeMessage, {
 
 type StartSession = (spec: BudgetSpec, now: number, endsAtMs: number | null, schedule?: ScheduleState) => Promise<PersistedSessionState>;
 
-const samples = new Map<string, { at: number; visible: boolean; playing: boolean }>();
+const samples = new Map<string, Activity & { at: number }>();
+const pendingUsage: Array<{ start: number; end: number; activity: Activity }> = [];
 let pending: Promise<unknown> = Promise.resolve();
+
+function chargePendingUsage(schedule: ScheduleState): ScheduleState {
+  for (const { start, end, activity } of pendingUsage) {
+    schedule = recordUsage(schedule, start, end, activity);
+  }
+  return schedule;
+}
 
 async function processMessage(
   message: ScheduleMessage,
@@ -31,7 +39,7 @@ async function processMessage(
       validateSchedule(message.enabled, rules);
       const rulesChanged = JSON.stringify(rules) !== JSON.stringify(schedule.rules);
       const enabledChanged = message.enabled !== schedule.enabled;
-      const usage = { ...schedule.usage };
+      const usage = { ...chargePendingUsage(schedule).usage };
       if (rulesChanged || enabledChanged) {
         for (const [key, entry] of Object.entries(usage)) {
           const [year, month, day] = key.split('-').map(Number);
@@ -54,23 +62,27 @@ async function processMessage(
       const next: ScheduleState = { ...schedule, enabled: message.enabled, rules, usage };
       if (rulesChanged) delete next.legacyCarry;
       await webext.storage.local.set({ [SCHEDULE_KEY]: next });
-      if (rulesChanged || message.enabled !== schedule.enabled) samples.clear();
+      pendingUsage.length = 0;
+      if (rulesChanged || enabledChanged) samples.clear();
       return next;
     }
     case 'SCHEDULE_SAMPLE': {
       const tabId = (sender as { tab?: { id?: number } } | undefined)?.tab?.id;
       if (tabId === undefined || !schedule.enabled) return;
       const id = `${tabId}:${message.documentId}`;
-      const previous = samples.get(id);
       for (const [key, sample] of samples) {
         if (now - sample.at > MAX_SAMPLE_GAP_MS) samples.delete(key);
       }
+      const previous = samples.get(id);
       const sample = { at: now, visible: message.visible, playing: message.playing };
-      const charged = previous ? recordUsage(schedule, previous.at, now, previous) : schedule;
-      const activeSamples = [...samples].filter(([key, cursor]) => key !== id && now - cursor.at < 2500);
-      const next = updateCounting(charged, now, [sample, ...activeSamples.map(([, cursor]) => cursor)]);
-      if (next !== schedule) await webext.storage.local.set({ [SCHEDULE_KEY]: next });
+      if (previous && previous.at < now && (previous.visible || previous.playing)) {
+        pendingUsage.push({ start: previous.at, end: now, activity: previous });
+      }
       samples.set(id, sample);
+      const activeSamples = [...samples.values()].filter((cursor) => now - cursor.at < 2500);
+      const next = updateCounting(chargePendingUsage(schedule), now, activeSamples);
+      if (next !== schedule) await webext.storage.local.set({ [SCHEDULE_KEY]: next });
+      pendingUsage.length = 0;
       return;
     }
     case 'START_SCHEDULED_SESSION': {
